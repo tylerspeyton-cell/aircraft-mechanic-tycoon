@@ -35,7 +35,7 @@
 
   const WORLD_BASE = { width: 1400, height: 900 };
   const PLAYER_RADIUS = 20;
-  const INTERACT_RANGE = 72;
+  const INTERACT_RANGE = 90;
   const MAX_WORKERS = 5;
 
   const AIRCRAFT_TYPES = {
@@ -70,6 +70,8 @@
   const game = {
     width: WORLD_BASE.width,
     height: WORLD_BASE.height,
+    viewWidth: 0,
+    viewHeight: 0,
     cameraX: 0,
     cameraY: 0,
     time: 0,
@@ -205,18 +207,10 @@
     return new Date().toISOString().slice(0, 10);
   }
 
-  function getScale() {
-    return {
-      x: canvas.width / canvas.clientWidth,
-      y: canvas.height / canvas.clientHeight
-    };
-  }
-
   function screenToWorld(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const scale = getScale();
-    const sx = (clientX - rect.left) * scale.x;
-    const sy = (clientY - rect.top) * scale.y;
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
     return {
       x: sx + game.cameraX,
       y: sy + game.cameraY
@@ -623,54 +617,83 @@
   }
 
   function updateCamera() {
-    game.cameraX = clamp(game.player.x - canvas.width * 0.5, 0, Math.max(0, game.width - canvas.width));
-    game.cameraY = clamp(game.player.y - canvas.height * 0.5, 0, Math.max(0, game.height - canvas.height));
+    game.cameraX = clamp(game.player.x - game.viewWidth * 0.5, 0, Math.max(0, game.width - game.viewWidth));
+    game.cameraY = clamp(game.player.y - game.viewHeight * 0.5, 0, Math.max(0, game.height - game.viewHeight));
   }
 
   function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    g.addColorStop(0, "#33586d");
-    g.addColorStop(1, "#17273f");
+    const g = ctx.createLinearGradient(0, 0, game.viewWidth, game.viewHeight);
+    g.addColorStop(0, "#2f5266");
+    g.addColorStop(0.55, "#21374e");
+    g.addColorStop(1, "#111d31");
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, game.viewWidth, game.viewHeight);
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
+    for (let i = -120; i < game.viewWidth + 120; i += 160) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i + 120, game.viewHeight);
+      ctx.lineTo(i + 80, game.viewHeight);
+      ctx.lineTo(i - 40, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     ctx.save();
     ctx.translate(-game.cameraX, -game.cameraY);
 
-    ctx.fillStyle = "#2f4a5e";
+    const floorGrad = ctx.createLinearGradient(60, 60, game.width - 60, game.height - 60);
+    floorGrad.addColorStop(0, "#2f495f");
+    floorGrad.addColorStop(1, "#203449");
+    ctx.fillStyle = floorGrad;
     ctx.fillRect(60, 60, game.width - 120, game.height - 120);
 
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
-    for (let x = 80; x < game.width - 80; x += 40) {
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 2;
+    for (let x = 80; x < game.width - 80; x += 56) {
       ctx.beginPath();
       ctx.moveTo(x, 80);
       ctx.lineTo(x, game.height - 80);
       ctx.stroke();
     }
-    for (let y = 80; y < game.height - 80; y += 40) {
+    for (let y = 80; y < game.height - 80; y += 56) {
       ctx.beginPath();
       ctx.moveTo(80, y);
       ctx.lineTo(game.width - 80, y);
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#5c6877";
-    ctx.fillRect(90, 90, 40, game.height - 180);
-    ctx.fillRect(game.width - 130, 90, 40, game.height - 180);
+    ctx.fillStyle = "#657487";
+    ctx.fillRect(88, 88, 54, game.height - 176);
+    ctx.fillRect(game.width - 142, 88, 54, game.height - 176);
+
+    ctx.fillStyle = "rgba(12, 20, 30, 0.4)";
+    ctx.fillRect(142, 88, 20, game.height - 176);
+    ctx.fillRect(game.width - 162, 88, 20, game.height - 176);
+
+    ctx.fillStyle = "rgba(255, 204, 88, 0.24)";
+    for (let y = 130; y < game.height - 130; y += 180) {
+      fillRoundedRect(178, y, game.width - 356, 10, 5);
+    }
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
+    ctx.fillRect(80, 80, game.width - 160, 24);
+    ctx.fillRect(80, game.height - 104, game.width - 160, 24);
 
     ctx.restore();
   }
 
   function drawAircraft(a) {
     const p = worldToScreen(a.x, a.y);
-    const size = 38 * a.def.size;
+    const size = 54 * a.def.size;
 
     ctx.save();
     ctx.translate(p.x, p.y);
 
     ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
     ctx.beginPath();
-    ctx.ellipse(0, 20, size * 0.95, 10, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 26, size * 1.04, 13, 0, 0, Math.PI * 2);
     ctx.fill();
 
     const flashAlpha = a.flash > 0 ? 0.22 * Math.sin(a.flash * 16) + 0.25 : 0;
@@ -681,47 +704,85 @@
       ctx.fill();
     }
 
-    ctx.fillStyle = a.def.color;
-    ctx.beginPath();
-    ctx.moveTo(-size * 0.8, 8);
-    ctx.lineTo(0, -size * 0.58);
-    ctx.lineTo(size * 0.8, 8);
-    ctx.lineTo(0, size * 0.44);
-    ctx.closePath();
-    ctx.fill();
+    const bodyGrad = ctx.createLinearGradient(-size, -size * 0.7, size, size * 0.7);
+    bodyGrad.addColorStop(0, "#f4fbff");
+    bodyGrad.addColorStop(0.45, a.def.color);
+    bodyGrad.addColorStop(1, "#1d3248");
 
-    ctx.fillStyle = "rgba(20,25,32,0.78)";
-    ctx.fillRect(-size * 1.2, -4, size * 2.4, 8);
+    if (a.key === "small") {
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, -size * 0.94);
+      ctx.lineTo(size * 0.22, -size * 0.35);
+      ctx.lineTo(size * 0.95, size * 0.2);
+      ctx.lineTo(size * 0.12, size * 0.85);
+      ctx.lineTo(-size * 0.12, size * 0.85);
+      ctx.lineTo(-size * 0.95, size * 0.2);
+      ctx.lineTo(-size * 0.22, -size * 0.35);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#1f3246";
+      ctx.fillRect(-size * 0.95, -size * 0.02, size * 1.9, size * 0.15);
+      ctx.fillRect(-size * 0.07, -size * 0.5, size * 0.14, size * 1.2);
+    }
+
     if (a.key === "helicopter") {
-      ctx.fillRect(-2, -size * 0.94, 4, size * 0.52);
-      ctx.fillRect(-size * 0.88, -size * 0.94, size * 1.76, 4);
+      ctx.fillStyle = bodyGrad;
+      fillRoundedRect(-size * 0.5, -size * 0.42, size, size * 0.95, size * 0.2);
+      ctx.fillRect(-size * 0.9, -size * 0.06, size * 1.8, size * 0.18);
+      ctx.fillStyle = "#152735";
+      ctx.fillRect(-size * 0.08, -size * 0.86, size * 0.16, size * 0.48);
+      ctx.fillRect(-size * 1.04, -size * 0.9, size * 2.08, size * 0.08);
+      ctx.fillStyle = "#95a9b8";
+      ctx.fillRect(-size * 0.9, size * 0.56, size * 1.8, size * 0.08);
     }
+
     if (a.key === "jet") {
-      ctx.fillRect(-size * 0.18, size * 0.15, size * 0.36, size * 0.6);
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(size * 0.26, -size * 0.2);
+      ctx.lineTo(size * 0.82, size * 0.2);
+      ctx.lineTo(size * 0.2, size * 0.84);
+      ctx.lineTo(-size * 0.2, size * 0.84);
+      ctx.lineTo(-size * 0.82, size * 0.2);
+      ctx.lineTo(-size * 0.26, -size * 0.2);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#192a3a";
+      ctx.fillRect(-size * 1.02, -size * 0.06, size * 2.04, size * 0.16);
+      ctx.fillRect(-size * 0.1, -size * 0.54, size * 0.2, size * 1.28);
+      ctx.fillStyle = "#ffb156";
+      ctx.fillRect(-size * 0.16, size * 0.56, size * 0.32, size * 0.2);
     }
+
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    fillRoundedRect(-size * 0.24, -size * 0.52, size * 0.48, size * 0.2, size * 0.08);
 
     ctx.restore();
 
-    const barW = 74;
+    const barW = 96;
     const barX = p.x - barW / 2;
-    const barY = p.y - size - 24;
+    const barY = p.y - size - 30;
 
-    ctx.fillStyle = "rgba(0,0,0,0.32)";
-    ctx.fillRect(barX, barY, barW, 10);
+    ctx.fillStyle = "rgba(0,0,0,0.42)";
+    fillRoundedRect(barX, barY, barW, 12, 6);
 
     if (a.state === "repairing") {
       const ratio = clamp(a.repairProgress / a.repairNeed, 0, 1);
       ctx.fillStyle = "#56d8c5";
-      ctx.fillRect(barX, barY, barW * ratio, 10);
+      fillRoundedRect(barX, barY, barW * ratio, 12, 6);
       ctx.fillStyle = "#dff6ff";
-      ctx.font = "11px Manrope";
+      ctx.font = "12px Manrope";
       ctx.fillText(`Repair ${Math.floor(ratio * 100)}%`, barX, barY - 5);
     } else {
       const ratio = clamp(a.wait / a.waitMax, 0, 1);
       ctx.fillStyle = ratio < 0.3 ? "#ff7e6b" : "#ffc94d";
-      ctx.fillRect(barX, barY, barW * ratio, 10);
+      fillRoundedRect(barX, barY, barW * ratio, 12, 6);
       ctx.fillStyle = "#dff6ff";
-      ctx.font = "11px Manrope";
+      ctx.font = "12px Manrope";
       if (a.state === "waiting") {
         ctx.fillText(`${a.repairType} check`, barX, barY - 5);
       } else if (a.state === "diagnosing") {
@@ -734,31 +795,38 @@
 
   function drawPlayer() {
     const p = worldToScreen(game.player.x, game.player.y);
-    const bob = Math.sin(game.player.step) * 2;
+    const bob = Math.sin(game.player.step) * 2.4;
 
     ctx.save();
     ctx.translate(p.x, p.y + bob);
 
     ctx.fillStyle = "rgba(0, 0, 0, 0.33)";
     ctx.beginPath();
-    ctx.ellipse(0, 24, 18, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 30, 23, 9, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "#ffd26f";
+    ctx.fillStyle = "#ffdb84";
     ctx.beginPath();
-    ctx.arc(0, -14, 10, 0, Math.PI * 2);
+    ctx.arc(0, -18, 12, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "#3ca5ff";
-    ctx.fillRect(-12, -4, 24, 24);
+    const suitGrad = ctx.createLinearGradient(-16, -10, 16, 28);
+    suitGrad.addColorStop(0, "#49b6ff");
+    suitGrad.addColorStop(1, "#2f7bc0");
+    ctx.fillStyle = suitGrad;
+    fillRoundedRect(-16, -6, 32, 30, 8);
 
     ctx.fillStyle = "#1f2f42";
-    const armOffset = Math.sin(game.player.step * 1.2) * 5;
-    ctx.fillRect(-16, 2 + armOffset, 7, 14);
-    ctx.fillRect(9, 2 - armOffset, 7, 14);
+    const armOffset = Math.sin(game.player.step * 1.2) * 6;
+    fillRoundedRect(-22, 2 + armOffset, 8, 17, 4);
+    fillRoundedRect(14, 2 - armOffset, 8, 17, 4);
+
+    ctx.fillStyle = "#182634";
+    fillRoundedRect(-13, 24, 10, 14, 4);
+    fillRoundedRect(3, 24, 10, 14, 4);
 
     ctx.fillStyle = "#d8e6ff";
-    ctx.fillRect(game.player.dir > 0 ? 7 : -12, -1, 7, 5);
+    fillRoundedRect(game.player.dir > 0 ? 10 : -17, -2, 8, 6, 3);
 
     ctx.restore();
   }
@@ -770,14 +838,14 @@
       ctx.translate(p.x, p.y);
       ctx.fillStyle = "rgba(0,0,0,0.24)";
       ctx.beginPath();
-      ctx.ellipse(0, 14, 14, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 20, 18, 7, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#83f0cf";
       ctx.beginPath();
-      ctx.arc(0, -6 + Math.sin(worker.pulse) * 1.6, 11, 0, Math.PI * 2);
+      ctx.arc(0, -8 + Math.sin(worker.pulse) * 1.8, 13, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#12303f";
-      ctx.fillRect(-8, 3, 16, 12);
+      fillRoundedRect(-10, 5, 20, 15, 5);
       ctx.restore();
     }
   }
@@ -817,8 +885,11 @@
     const slots = computeSlots();
     for (let i = 0; i < slots.length; i += 1) {
       const s = slots[i];
-      ctx.strokeStyle = "rgba(255,255,255,0.14)";
-      ctx.strokeRect(s.x - 52, s.y - 40, 104, 80);
+      ctx.strokeStyle = "rgba(255,255,255,0.2)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.strokeRect(s.x - 68, s.y - 50, 136, 100);
+      ctx.setLineDash([]);
     }
     ctx.restore();
   }
@@ -834,10 +905,11 @@
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    game.viewWidth = canvas.clientWidth;
+    game.viewHeight = canvas.clientHeight;
     canvas.width = Math.floor(canvas.clientWidth * dpr);
     canvas.height = Math.floor(canvas.clientHeight * dpr);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(1, 1);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   function updateUI() {
