@@ -1024,45 +1024,45 @@
     for (const worker of game.workers) {
       worker.pulse += dt * 3;
 
-      let target = game.aircraft.find((a) => a.id === worker.targetId && ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
+      // Re-evaluate target every tick so workers break off for higher-priority unattended planes.
+      const activeStates = ["waiting", "diagnosing", "repairing", "done"];
+      const pool = game.aircraft.filter((a) => activeStates.includes(a.state));
 
-      if (!target) {
-        const activeStates = ["waiting", "diagnosing", "repairing", "done"];
-        const pool = game.aircraft.filter((a) => activeStates.includes(a.state));
+      // Track which planes other workers are already heading to.
+      const attendedIds = new Set(game.workers
+        .filter((w) => w !== worker && w.targetId)
+        .map((w) => w.targetId));
+      // The player is also "attending" whichever plane they are next to and acting on.
+      const playerNearest = nearestInteractable();
+      if (playerNearest.target && playerNearest.distance <= INTERACT_RANGE + 30 &&
+          (game.input.actionHeld || playerNearest.target.state === "repairing" || playerNearest.target.state === "diagnosing")) {
+        attendedIds.add(playerNearest.target.id);
+      }
 
-        // Workers claimed by any other worker
-        const attendedIds = new Set(game.workers
-          .filter((w) => w !== worker && w.targetId)
-          .map((w) => w.targetId));
-        // The player is also "attending" whichever plane they are next to and acting on
-        const playerNearest = nearestInteractable();
-        if (playerNearest.target && playerNearest.distance <= INTERACT_RANGE + 30 &&
-            (game.input.actionHeld || playerNearest.target.state === "repairing" || playerNearest.target.state === "diagnosing")) {
-          attendedIds.add(playerNearest.target.id);
+      const unattended = pool.filter((a) => !attendedIds.has(a.id));
+      const searchPool = unattended.length > 0 ? unattended : pool;
+
+      let best = null;
+      let bestScore = Infinity;
+      for (const a of searchPool) {
+        let statePriority = 3;
+        if (a.state === "repairing") statePriority = 0;
+        else if (a.state === "diagnosing") statePriority = 1;
+        else if (a.state === "waiting") statePriority = 2;
+        // Small hysteresis bonus for the current target to prevent micro-thrashing.
+        const stickBonus = (a.id === worker.targetId) ? -60 : 0;
+        const score = dist(worker, a) + statePriority * 180 + stickBonus;
+        if (score < bestScore) {
+          bestScore = score;
+          best = a;
         }
+      }
 
-        const unattended = pool.filter((a) => !attendedIds.has(a.id));
-        const searchPool = unattended.length > 0 ? unattended : pool;
-
-        let best = null;
-        let bestScore = Infinity;
-        for (const a of searchPool) {
-          let statePriority = 3;
-          if (a.state === "repairing") statePriority = 0;
-          else if (a.state === "diagnosing") statePriority = 1;
-          else if (a.state === "waiting") statePriority = 2;
-          const score = dist(worker, a) + statePriority * 180;
-          if (score < bestScore) {
-            bestScore = score;
-            best = a;
-          }
-        }
-        target = best;
-        if (target) {
-          worker.targetId = target.id;
-        } else {
-          releaseReservation(worker);
-        }
+      const target = best;
+      if (target) {
+        worker.targetId = target.id;
+      } else {
+        releaseReservation(worker);
       }
 
       if (!target) continue;
