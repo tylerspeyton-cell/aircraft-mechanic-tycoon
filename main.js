@@ -43,6 +43,7 @@
   const PLAYER_RADIUS = 26;
   const INTERACT_RANGE = 110;
   const MAX_WORKERS = 5;
+  const DAY_LENGTH = 90; // seconds per in-game day
 
   const AIRCRAFT_TYPES = {
     small: {
@@ -73,6 +74,53 @@
 
   const REPAIR_TYPES = ["Engine", "Tires", "Electrical"];
 
+  const WEATHER_CONFIG = {
+    winter: {
+      label: "Winter",
+      accent: "#7dd3fc",
+      slowMultiplier: 0.72,
+      fastMultiplier: 1.28,
+      longItem: {
+        stateKey: "winterJacketUntil",
+        icon: "🧥",
+        title: "Thermal Jacket",
+        cost: 2200,
+        duration: DAY_LENGTH * 3.5,
+        desc: "Expensive, long-lasting protection that keeps you working at normal speed"
+      },
+      shortItem: {
+        stateKey: "coffeeUntil",
+        icon: "☕",
+        title: "Hot Coffee",
+        cost: 160,
+        duration: 45,
+        desc: "Short boost that makes you work fast"
+      }
+    },
+    summer: {
+      label: "Summer",
+      accent: "#fca85d",
+      slowMultiplier: 0.72,
+      fastMultiplier: 1.28,
+      longItem: {
+        stateKey: "summerFanUntil",
+        icon: "🌀",
+        title: "Cooling Fan",
+        cost: 2200,
+        duration: DAY_LENGTH * 3.5,
+        desc: "Expensive, long-lasting cooling that keeps you working at normal speed"
+      },
+      shortItem: {
+        stateKey: "popsicleUntil",
+        icon: "🍧",
+        title: "Popsicle",
+        cost: 160,
+        duration: 45,
+        desc: "Short boost that makes you work fast"
+      }
+    }
+  };
+
   function createInitialState() {
     return {
       money: 260,
@@ -96,6 +144,10 @@
       atcLevel: 1,
       fuelLevel: 1,
       eliteLevel: 1,
+      winterJacketUntil: 0,
+      coffeeUntil: 0,
+      summerFanUntil: 0,
+      popsicleUntil: 0,
       lastDailyClaim: "",
       totalRepairs: 0,
       strikes: 0,
@@ -178,7 +230,8 @@
       nextEvent: 20
     },
     dayTracker: {
-      currentDay: 1
+      currentDay: 1,
+      season: "winter"
     },
     sessionEnded: false,
     player: {
@@ -406,11 +459,11 @@
   }
 
   function getRepairRate() {
-    return 1.2 + game.state.repairLevel * 0.3;
+    return (1.2 + game.state.repairLevel * 0.3) * getPlayerWorkMultiplier();
   }
 
   function getMoveSpeed() {
-    return 165 + game.state.speedLevel * 28;
+    return (165 + game.state.speedLevel * 28) * getPlayerWorkMultiplier();
   }
 
   function getValueMultiplier() {
@@ -421,8 +474,9 @@
     return 1 + (game.state.combo - 1) * 0.08;
   }
 
-  function getDiagnoseSpeed() {
-    return 1 + (game.state.diagnoseLevel - 1) * 0.35;
+  function getDiagnoseSpeed(actor = "player") {
+    const base = 1 + (game.state.diagnoseLevel - 1) * 0.35;
+    return actor === "player" ? base * getPlayerWorkMultiplier() : base;
   }
 
   function getWaitMultiplier() {
@@ -457,6 +511,70 @@
 
   function getEliteWeight() {
     return 1 + (game.state.eliteLevel - 1) * 0.35;
+  }
+
+  function getCurrentSeason() {
+    return Math.floor((getCurrentDay() - 1) / 5) % 2 === 0 ? "winter" : "summer";
+  }
+
+  function getSeasonConfig() {
+    return WEATHER_CONFIG[getCurrentSeason()];
+  }
+
+  function getWeatherItemRemaining(stateKey) {
+    return Math.max(0, game.state[stateKey] - game.elapsed);
+  }
+
+  function isWeatherItemActive(stateKey) {
+    return getWeatherItemRemaining(stateKey) > 0;
+  }
+
+  function formatTimer(seconds) {
+    const total = Math.max(0, Math.ceil(seconds));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  function getPlayerWorkMultiplier() {
+    const season = getSeasonConfig();
+    const hasFastBoost = isWeatherItemActive(season.shortItem.stateKey);
+    const hasProtection = isWeatherItemActive(season.longItem.stateKey);
+
+    if (hasFastBoost) return season.fastMultiplier;
+    if (hasProtection) return 1;
+    return season.slowMultiplier;
+  }
+
+  function getWeatherSpeedLabel() {
+    const multiplier = getPlayerWorkMultiplier();
+    if (multiplier < 1) return "Slow";
+    if (multiplier > 1) return "Fast";
+    return "Normal";
+  }
+
+  function getWeatherNeedText() {
+    const season = getSeasonConfig();
+    const longTitle = season.longItem.title;
+    const shortTitle = season.shortItem.title;
+    const hasFastBoost = isWeatherItemActive(season.shortItem.stateKey);
+    const hasProtection = isWeatherItemActive(season.longItem.stateKey);
+
+    if (hasProtection && hasFastBoost) {
+      return `${longTitle} + ${shortTitle} active`;
+    }
+    if (hasFastBoost) {
+      return `${shortTitle} active`;
+    }
+    if (hasProtection) {
+      return `${longTitle} active`;
+    }
+    return `Buy ${longTitle} or ${shortTitle}`;
+  }
+
+  function buyWeatherItem(item) {
+    game.state[item.stateKey] = Math.max(game.state[item.stateKey], game.elapsed) + item.duration;
+    return `${item.title} active for ${formatTimer(getWeatherItemRemaining(item.stateKey))}`;
   }
 
   function getCurrentDay() {
@@ -604,10 +722,17 @@
 
   function updateDayEvents() {
     const dayNum = getCurrentDay();
+    const season = getCurrentSeason();
 
     if (dayNum !== game.dayTracker.currentDay) {
       game.dayTracker.currentDay = dayNum;
       showToast(`Day ${dayNum} started`);
+
+      if (season !== game.dayTracker.season) {
+        game.dayTracker.season = season;
+        const seasonInfo = getSeasonConfig();
+        showToast(`${seasonInfo.label} started. Buy ${seasonInfo.longItem.title} or ${seasonInfo.shortItem.title}.`);
+      }
     }
 
     if (game.state.lastBreakDay !== dayNum) {
@@ -627,7 +752,7 @@
   function startDiagnose(aircraft, actor = "player") {
     if (aircraft.state !== "waiting") return;
     aircraft.state = "diagnosing";
-    aircraft.diagnoseTimer = (1 + Math.random() * 0.7) / getDiagnoseSpeed();
+    aircraft.diagnoseTimer = (1 + Math.random() * 0.7) / getDiagnoseSpeed(actor);
     aircraft.reservedBy = actor;
     aircraft.flash = 0.4;
     showToast(`${aircraft.repairType} issue detected`);
@@ -1622,6 +1747,41 @@
   }
 
   function drawStatusOverlay() {
+    if (!isGamePaused()) {
+      const season = getSeasonConfig();
+      const longRemain = getWeatherItemRemaining(season.longItem.stateKey);
+      const shortRemain = getWeatherItemRemaining(season.shortItem.stateKey);
+      const compact = game.viewWidth < 760;
+      const panelWidth = Math.min(game.viewWidth - 28, compact ? 270 : 360);
+      const panelHeight = compact ? 52 : 60;
+      const panelX = 14;
+      const panelY = (topBar?.offsetHeight || 88) + 14;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(9, 16, 24, 0.78)";
+      fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
+      ctx.strokeStyle = season.accent;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
+
+      ctx.fillStyle = season.accent;
+      ctx.font = compact ? "bold 12px Manrope" : "bold 13px Manrope";
+      ctx.fillText(`${season.label} | ${getWeatherSpeedLabel()} speed`, panelX + 12, panelY + 18);
+
+      ctx.fillStyle = "#eff7ff";
+      ctx.font = compact ? "11px Manrope" : "12px Manrope";
+      ctx.fillText(getWeatherNeedText(), panelX + 12, panelY + 34);
+
+      const timerParts = [];
+      if (longRemain > 0) timerParts.push(`${season.longItem.title} ${formatTimer(longRemain)}`);
+      if (shortRemain > 0) timerParts.push(`${season.shortItem.title} ${formatTimer(shortRemain)}`);
+      if (timerParts.length > 0) {
+        ctx.fillStyle = "#c7d9ec";
+        ctx.fillText(timerParts.join(" | "), panelX + 12, panelY + 49);
+      }
+      ctx.restore();
+    }
+
     if (game.incident.active && !isGamePaused()) {
       const compact = game.viewWidth < 720;
       const panelWidth = Math.min(game.viewWidth - 28, compact ? 230 : 360);
@@ -1708,7 +1868,7 @@
     xpText.textContent = `${Math.floor(game.state.xp)} / ${game.state.xpToNext} XP`;
     xpFill.style.width = `${(game.state.xp / game.state.xpToNext) * 100}%`;
     comboValue.textContent = `x${getComboMultiplier().toFixed(1)}`;
-    dayValue.textContent = `Day ${getCurrentDay()}`;
+    dayValue.textContent = `Day ${getCurrentDay()} | ${getSeasonConfig().label}`;
     strikesValue.textContent = `${game.state.strikes}/3`;
 
     pauseBtn.textContent = game.pause.manual ? "Resume" : "Pause";
@@ -1753,13 +1913,46 @@
 
   function updateUpgradeUI() {
     const CATEGORY_COLORS = {
+      seasonal: getSeasonConfig().accent,
       operations: "#56d8c5",
       economy: "#fbbf24",
       expansion: "#b89dff",
       contracts: "#ff9f4d"
     };
 
+    const season = getSeasonConfig();
+    const longRemain = getWeatherItemRemaining(season.longItem.stateKey);
+    const shortRemain = getWeatherItemRemaining(season.shortItem.stateKey);
+
     const sections = [
+      {
+        label: `${season.label} Gear`,
+        cat: "seasonal",
+        items: [
+          {
+            id: season.longItem.stateKey,
+            icon: season.longItem.icon,
+            title: season.longItem.title,
+            desc: `${season.longItem.desc}${longRemain > 0 ? ` (${formatTimer(longRemain)} left)` : ""}`,
+            cost: season.longItem.cost,
+            onBuy: () => buyWeatherItem(season.longItem),
+            available: true,
+            repeatable: true,
+            badgeText: longRemain > 0 ? formatTimer(longRemain) : "Ready"
+          },
+          {
+            id: season.shortItem.stateKey,
+            icon: season.shortItem.icon,
+            title: season.shortItem.title,
+            desc: `${season.shortItem.desc}${shortRemain > 0 ? ` (${formatTimer(shortRemain)} left)` : ""}`,
+            cost: season.shortItem.cost,
+            onBuy: () => buyWeatherItem(season.shortItem),
+            available: true,
+            repeatable: true,
+            badgeText: shortRemain > 0 ? formatTimer(shortRemain) : "Ready"
+          }
+        ]
+      },
       {
         label: "Operations",
         cat: "operations",
@@ -1938,7 +2131,7 @@
       upgradeList.appendChild(sectionHeader);
 
       for (const def of section.items) {
-        const isMaxed = !def.available;
+        const isMaxed = !def.repeatable && !def.available;
         const canAfford = game.state.money >= def.cost;
 
         const item = document.createElement("div");
@@ -1963,7 +2156,9 @@
 
         const levelBadge = document.createElement("span");
         levelBadge.className = "upg-level-badge";
-        if (isMaxed) {
+        if (def.badgeText) {
+          levelBadge.textContent = def.badgeText;
+        } else if (isMaxed) {
           levelBadge.textContent = "MAX";
           levelBadge.classList.add("maxed");
         } else {
@@ -1996,9 +2191,9 @@
         btn.addEventListener("click", () => {
           if (!def.available || game.state.money < def.cost) return;
           game.state.money -= def.cost;
-          def.onBuy();
+          const buyMessage = def.onBuy();
           playSound("upgrade");
-          showToast(`${def.title} upgraded!`);
+          showToast(buyMessage || `${def.title} upgraded!`);
           updateUpgradeUI();
         });
 
@@ -2101,8 +2296,6 @@
     "That repair is too hard, get someone else!",
     "COME ON COME ON COME ON!! HURRY UP!!"
   ];
-
-  const DAY_LENGTH = 90; // seconds per in-game day
 
   function updateBoss(dt) {
     const b = game.boss;
@@ -2626,6 +2819,7 @@
   function init() {
     loadGame();
     game.dayTracker.currentDay = getCurrentDay();
+    game.dayTracker.season = getCurrentSeason();
     setupControls();
     resize();
     applyLoadedSettings();
