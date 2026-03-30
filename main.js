@@ -557,6 +557,11 @@
     return season.slowMultiplier;
   }
 
+  function hasSeasonWeatherRelief() {
+    const season = getSeasonConfig();
+    return isWeatherItemActive(season.shortItem.stateKey) || isWeatherItemActive(season.longItem.stateKey);
+  }
+
   function getWeatherSpeedLabel() {
     const multiplier = getPlayerWorkMultiplier();
     if (multiplier < 1) return "Slow";
@@ -1567,8 +1572,9 @@
     const bob = Math.sin(game.player.step) * 2.8;
     const armSwing = Math.sin(game.player.step * 1.1) * 7;
     const season = getCurrentSeason();
-    const isWinter = season === "winter";
-    const isSummer = season === "summer";
+    const showSeasonDiscomfort = !hasSeasonWeatherRelief();
+    const isWinter = season === "winter" && showSeasonDiscomfort;
+    const isSummer = season === "summer" && showSeasonDiscomfort;
 
     ctx.save();
     ctx.translate(p.x, p.y + bob);
