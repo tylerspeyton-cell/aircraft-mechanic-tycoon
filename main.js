@@ -120,6 +120,19 @@
       tapTarget: null,
       pointerDown: false
     },
+    boss: {
+      phase: "idle",   // "idle" | "entering" | "yelling" | "leaving"
+      x: -90,
+      y: 0,
+      timer: 0,
+      nextEvent: 45,   // seconds until first visit
+      msgIndex: 0,
+      shake: 0
+    },
+    cookieDay: {
+      lastDay: 0,
+      banner: 0         // display timer in seconds
+    },
     player: {
       x: 320,
       y: 380,
@@ -1282,7 +1295,9 @@
     for (const a of game.aircraft) drawAircraft(a);
     drawWorkers();
     drawPlayer();
+    drawBoss();
     drawInteractionHint();
+    drawCookieDayBanner();
   }
 
   function resize() {
@@ -1665,6 +1680,297 @@
     }
   }
 
+  const TAN_LINES = [
+    "HURRY UP!! We have planes waiting!!",
+    "You can't do that job — that's TOO HARD for you!",
+    "WHAT ARE YOU DOING?! Move faster!!",
+    "I'm watching you! SPEED IT UP!!",
+    "That repair is too hard, get someone else!",
+    "COME ON COME ON COME ON!! HURRY UP!!"
+  ];
+
+  const DAY_LENGTH = 90; // seconds per in-game day
+
+  function updateBoss(dt) {
+    const b = game.boss;
+    if (b.shake > 0) b.shake -= dt;
+
+    if (b.phase === "idle") {
+      b.nextEvent -= dt;
+      if (b.nextEvent <= 0) {
+        b.phase = "entering";
+        b.y = game.viewHeight * 0.45;
+        b.x = -90;
+        b.msgIndex = Math.floor(Math.random() * TAN_LINES.length);
+        b.timer = 0;
+      }
+      return;
+    }
+
+    if (b.phase === "entering") {
+      b.x += dt * 140;
+      if (b.x >= 90) {
+        b.x = 90;
+        b.phase = "yelling";
+        b.timer = 3.5;
+        b.shake = 3.5;
+        showToast(`Tan: "${TAN_LINES[b.msgIndex]}"`);
+        playSound("alert");
+        vibrate([80, 40, 80]);
+      }
+      return;
+    }
+
+    if (b.phase === "yelling") {
+      b.timer -= dt;
+      if (b.timer <= 0) {
+        b.phase = "leaving";
+      }
+      return;
+    }
+
+    if (b.phase === "leaving") {
+      b.x -= dt * 160;
+      if (b.x < -90) {
+        b.x = -90;
+        b.phase = "idle";
+        // Next visit in 50-100 seconds
+        b.nextEvent = 50 + Math.random() * 50;
+      }
+    }
+  }
+
+  function updateCookieDay(dt) {
+    const cd = game.cookieDay;
+    if (cd.banner > 0) {
+      cd.banner -= dt;
+    }
+
+    const dayNum = Math.floor(game.elapsed / DAY_LENGTH) + 1;
+    if (dayNum > 1 && dayNum % 4 === 0 && dayNum !== cd.lastDay) {
+      cd.lastDay = dayNum;
+      cd.banner = 6;
+      const bonus = 250 + game.state.level * 30;
+      game.state.money += bonus;
+      addXP(60);
+      playSound("cash");
+      vibrate([50, 30, 50, 30, 100]);
+    }
+  }
+
+  function drawBoss() {
+    const b = game.boss;
+    if (b.phase === "idle") return;
+
+    const shakeX = b.shake > 0 ? (Math.random() - 0.5) * 3 : 0;
+    const bob = b.phase === "yelling" ? Math.sin(game.time * 14) * 2.5 : 0;
+
+    ctx.save();
+    ctx.translate(b.x + shakeX, b.y + bob);
+
+    // Shadow
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.beginPath();
+    ctx.ellipse(0, 42, 22, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Legs
+    ctx.fillStyle = "#1a0a00";
+    fillRoundedRect(-13, 26, 10, 20, 4);
+    fillRoundedRect(3, 26, 10, 20, 4);
+    // Shoes
+    ctx.fillStyle = "#0a0500";
+    fillRoundedRect(-15, 42, 13, 6, 3);
+    fillRoundedRect(3, 42, 13, 6, 3);
+
+    // Suit body (dark red — angry boss)
+    const suitGrad = ctx.createLinearGradient(-15, -12, 15, 28);
+    suitGrad.addColorStop(0, "#c0392b");
+    suitGrad.addColorStop(0.5, "#962020");
+    suitGrad.addColorStop(1, "#5c1010");
+    ctx.fillStyle = suitGrad;
+    fillRoundedRect(-15, -12, 30, 39, 7);
+
+    // Tie
+    ctx.fillStyle = "#2c0a0a";
+    fillRoundedRect(-4, -8, 8, 26, 3);
+
+    // Arms (angry pose — raised slightly)
+    ctx.fillStyle = "#6b1a1a";
+    fillRoundedRect(-26, -10, 12, 22, 4);
+    fillRoundedRect(14, -10, 12, 22, 4);
+    // Fists
+    ctx.fillStyle = "#f0c080";
+    ctx.beginPath();
+    ctx.arc(-20, 14, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(20, 14, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Neck
+    ctx.fillStyle = "#f0b870";
+    fillRoundedRect(-5, -20, 10, 10, 3);
+
+    // Head
+    ctx.fillStyle = "#f0b870";
+    ctx.beginPath();
+    ctx.arc(0, -30, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hair (dark, slicked back)
+    ctx.fillStyle = "#1a0a00";
+    ctx.beginPath();
+    ctx.ellipse(0, -40, 14, 6, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes (angry — angled eyebrows)
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(-5, -30, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(5, -30, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#1a0808";
+    ctx.beginPath();
+    ctx.arc(-5, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(5, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+    // Eyebrows (angry V shape)
+    ctx.strokeStyle = "#1a0a00";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-9, -35);
+    ctx.lineTo(-2, -33);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(9, -35);
+    ctx.lineTo(2, -33);
+    ctx.stroke();
+
+    // Mouth (yelling O)
+    ctx.fillStyle = "#6b0000";
+    ctx.beginPath();
+    ctx.ellipse(0, -23, 5, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Name tag
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    fillRoundedRect(-18, -6, 36, 12, 3);
+    ctx.fillStyle = "#6b0000";
+    ctx.font = "bold 9px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TAN", 0, 0);
+
+    // Speech bubble (during yelling phase)
+    if (b.phase === "yelling") {
+      const msg = TAN_LINES[b.msgIndex];
+      const maxW = 200;
+      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+
+      // Word wrap
+      const words = msg.split(" ");
+      const lines = [];
+      let cur = "";
+      for (const w of words) {
+        const test = cur ? cur + " " + w : w;
+        if (ctx.measureText(test).width > maxW - 16) {
+          if (cur) lines.push(cur);
+          cur = w;
+        } else {
+          cur = test;
+        }
+      }
+      if (cur) lines.push(cur);
+
+      const lineH = 16;
+      const bW = maxW;
+      const bH = lines.length * lineH + 16;
+      const bX = 18;
+      const bY = -62 - bH;
+
+      // Bubble fill
+      ctx.fillStyle = "rgba(255, 240, 220, 0.97)";
+      ctx.strokeStyle = "#c0392b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const br = 8;
+      ctx.moveTo(bX + br, bY);
+      ctx.lineTo(bX + bW - br, bY);
+      ctx.arcTo(bX + bW, bY, bX + bW, bY + br, br);
+      ctx.lineTo(bX + bW, bY + bH - br);
+      ctx.arcTo(bX + bW, bY + bH, bX + bW - br, bY + bH, br);
+      ctx.lineTo(bX + 22, bY + bH);
+      ctx.lineTo(bX + 10, bY + bH + 12);
+      ctx.lineTo(bX + 34, bY + bH);
+      ctx.lineTo(bX + br, bY + bH);
+      ctx.arcTo(bX, bY + bH, bX, bY + bH - br, br);
+      ctx.lineTo(bX, bY + br);
+      ctx.arcTo(bX, bY, bX + br, bY, br);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#6b0000";
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], bX + 8, bY + 8 + i * lineH);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawCookieDayBanner() {
+    const cd = game.cookieDay;
+    if (cd.banner <= 0) return;
+
+    const alpha = Math.min(1, cd.banner * 0.6);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    const bW = 340;
+    const bH = 80;
+    const bX = (game.viewWidth - bW) / 2;
+    const bY = game.viewHeight * 0.22;
+
+    // Banner background
+    const banGrad = ctx.createLinearGradient(bX, bY, bX + bW, bY + bH);
+    banGrad.addColorStop(0, "#8B4513");
+    banGrad.addColorStop(0.5, "#D2691E");
+    banGrad.addColorStop(1, "#8B4513");
+    ctx.fillStyle = banGrad;
+    ctx.strokeStyle = "#F4A460";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const r = 14;
+    ctx.moveTo(bX + r, bY);
+    ctx.arcTo(bX + bW, bY, bX + bW, bY + bH, r);
+    ctx.arcTo(bX + bW, bY + bH, bX, bY + bH, r);
+    ctx.arcTo(bX, bY + bH, bX, bY, r);
+    ctx.arcTo(bX, bY, bX + bW, bY, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Cookie emoji + text
+    ctx.fillStyle = "#FFF8DC";
+    ctx.font = "bold 22px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("COOKIE DAY SURPRISE!", bX + bW / 2, bY + 28);
+    ctx.font = "15px sans-serif";
+    ctx.fillStyle = "#FFE4B5";
+    ctx.fillText("Free cookies in the break room! Bonus cash earned!", bX + bW / 2, bY + 56);
+
+    ctx.restore();
+  }
+
   function update(dt) {
     game.elapsed += dt;
     game.time += dt;
@@ -1679,6 +1985,8 @@
     updateSpawn(dt);
     updateIdleIncome(dt);
     updateCombo(dt);
+    updateBoss(dt);
+    updateCookieDay(dt);
     updateCamera();
 
     game.saveTimer += dt;
