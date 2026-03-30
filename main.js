@@ -121,6 +121,11 @@
     }
   };
 
+  const FIRE_RESET_START_MONEY = Math.max(
+    WEATHER_CONFIG.winter.longItem.cost,
+    WEATHER_CONFIG.summer.longItem.cost
+  );
+
   function createInitialState() {
     return {
       money: 2500,
@@ -160,7 +165,7 @@
   function createFiredResetState() {
     return {
       ...createInitialState(),
-      money: 0,
+      money: FIRE_RESET_START_MONEY,
       tutorialDone: game.state.tutorialDone,
       lastDailyClaim: game.state.lastDailyClaim
     };
@@ -331,6 +336,33 @@
     gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
     osc.start(now);
     osc.stop(now + dur + 0.01);
+  }
+
+  function playBossYell() {
+    if (!game.settings.sound) return;
+    ensureAudio();
+    if (!audioCtx) return;
+
+    const bursts = [0, 0.14, 0.31];
+    for (const offset of bursts) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const start = audioCtx.currentTime + offset;
+      const dur = 0.2;
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(780, start);
+      osc.frequency.exponentialRampToValueAtTime(145, start + dur);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.23, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    }
   }
 
   function todayKey() {
@@ -763,6 +795,7 @@
     game.sessionEndTimer = 0;
     game.pause.manual = false;
     startForcedPause("3 strikes. You are fired.", 3.5);
+    playBossYell();
     showToast("You are fired. Restarting...");
 
     // Reset progression immediately so any follow-up save keeps the wiped state.
@@ -994,11 +1027,26 @@
       let target = game.aircraft.find((a) => a.id === worker.targetId && ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
 
       if (!target) {
-        const pool = game.aircraft.filter((a) => ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
+        const activeStates = ["waiting", "diagnosing", "repairing", "done"];
+        const pool = game.aircraft.filter((a) => activeStates.includes(a.state));
+
+        // Workers claimed by any other worker
+        const attendedIds = new Set(game.workers
+          .filter((w) => w !== worker && w.targetId)
+          .map((w) => w.targetId));
+        // The player is also "attending" whichever plane they are next to and acting on
+        const playerNearest = nearestInteractable();
+        if (playerNearest.target && playerNearest.distance <= INTERACT_RANGE + 30 &&
+            (game.input.actionHeld || playerNearest.target.state === "repairing" || playerNearest.target.state === "diagnosing")) {
+          attendedIds.add(playerNearest.target.id);
+        }
+
+        const unattended = pool.filter((a) => !attendedIds.has(a.id));
+        const searchPool = unattended.length > 0 ? unattended : pool;
 
         let best = null;
         let bestScore = Infinity;
-        for (const a of pool) {
+        for (const a of searchPool) {
           let statePriority = 3;
           if (a.state === "repairing") statePriority = 0;
           else if (a.state === "diagnosing") statePriority = 1;
@@ -3257,6 +3305,10 @@
     });
 
     fullscreenBtn.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", () => {
+      updateFullscreenButtonLabel();
+      resize();
+    });
 
     claimDailyBtn.addEventListener("click", () => {
       claimDailyReward();
@@ -3284,6 +3336,51 @@
     upgradeModal.showModal();
   }
 
+  function isLikelyMobileDevice() {
+    return window.matchMedia("(max-width: 980px), (pointer: coarse)").matches;
+  }
+
+  function updateFullscreenButtonLabel() {
+    fullscreenBtn.textContent = document.fullscreenElement ? "Minimize" : "Fullscreen";
+  }
+
+  function armMobileFullscreenFallback() {
+    if (!isLikelyMobileDevice() || document.fullscreenElement) return;
+
+    const root = document.documentElement;
+    const attempt = async () => {
+      if (document.fullscreenElement) return;
+      try {
+        await root.requestFullscreen();
+      } catch (_err) {
+        // Some browsers still block fullscreen even after gesture.
+      }
+      updateFullscreenButtonLabel();
+      window.removeEventListener("pointerdown", attempt, true);
+      window.removeEventListener("keydown", attempt, true);
+      window.removeEventListener("touchstart", attempt, true);
+    };
+
+    window.addEventListener("pointerdown", attempt, true);
+    window.addEventListener("keydown", attempt, true);
+    window.addEventListener("touchstart", attempt, true);
+    showToast("Tap once to enter fullscreen");
+  }
+
+  async function autoFullscreenForMobile() {
+    if (!isLikelyMobileDevice() || document.fullscreenElement) {
+      updateFullscreenButtonLabel();
+      return;
+    }
+
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch (_err) {
+      armMobileFullscreenFallback();
+    }
+    updateFullscreenButtonLabel();
+  }
+
   async function toggleFullscreen() {
     const root = document.documentElement;
     if (!document.fullscreenElement) {
@@ -3294,7 +3391,9 @@
       }
     } else {
       await document.exitFullscreen();
+      showToast("Fullscreen off");
     }
+    updateFullscreenButtonLabel();
   }
 
   function applyLoadedSettings() {
@@ -3317,6 +3416,8 @@
     setupControls();
     resize();
     applyLoadedSettings();
+    updateFullscreenButtonLabel();
+    autoFullscreenForMobile();
     runTutorialIfNeeded();
     checkDailyRewardPrompt();
 
