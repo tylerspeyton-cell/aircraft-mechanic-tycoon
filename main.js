@@ -959,11 +959,6 @@
 
   function updateWorkers(dt) {
     function releaseReservation(worker) {
-      if (!worker.targetId) return;
-      const held = game.aircraft.find((a) => a.id === worker.targetId);
-      if (held && held.reservedBy === worker.id) {
-        held.reservedBy = null;
-      }
       worker.targetId = null;
     }
 
@@ -997,20 +992,18 @@
       worker.pulse += dt * 3;
 
       let target = game.aircraft.find((a) => a.id === worker.targetId && ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
-      if (target && target.reservedBy && target.reservedBy !== worker.id) {
-        releaseReservation(worker);
-        target = null;
-      }
 
       if (!target) {
-        const candidates = game.aircraft.filter((a) => ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
-        const open = candidates.filter((a) => !a.reservedBy || a.reservedBy === worker.id);
-        const pool = open.length > 0 ? open : (candidates.length === 1 ? candidates : []);
+        const pool = game.aircraft.filter((a) => ["waiting", "diagnosing", "repairing", "done"].includes(a.state));
 
         let best = null;
         let bestScore = Infinity;
         for (const a of pool) {
-          const score = dist(worker, a);
+          let statePriority = 3;
+          if (a.state === "repairing") statePriority = 0;
+          else if (a.state === "diagnosing") statePriority = 1;
+          else if (a.state === "waiting") statePriority = 2;
+          const score = dist(worker, a) + statePriority * 180;
           if (score < bestScore) {
             bestScore = score;
             best = a;
@@ -1018,7 +1011,6 @@
         }
         target = best;
         if (target) {
-          target.reservedBy = worker.id;
           worker.targetId = target.id;
         } else {
           releaseReservation(worker);
