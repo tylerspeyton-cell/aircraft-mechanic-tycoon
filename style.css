@@ -133,6 +133,15 @@ body {
   font-size: 0.92rem;
   cursor: pointer;
   box-shadow: 0 8px 18px var(--shadow);
+  transition: transform 80ms ease, box-shadow 80ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pill-btn:active,
+.action-btn:active {
+  transform: scale(0.93);
+  box-shadow: 0 3px 8px var(--shadow);
 }
 
 .pill-btn.primary {
@@ -147,6 +156,30 @@ body {
   bottom: 106px;
   z-index: 13;
   min-width: 142px;
+  transition: transform 80ms ease, box-shadow 80ms ease, background 200ms ease, border-color 200ms ease;
+}
+
+.action-btn.ready-diagnose {
+  background: linear-gradient(160deg, rgba(86, 216, 197, 0.55), rgba(86, 216, 197, 0.2));
+  border-color: var(--mint);
+  animation: btnPulse 1.1s ease-in-out infinite;
+}
+
+.action-btn.ready-repair {
+  background: linear-gradient(160deg, rgba(255, 201, 77, 0.55), rgba(255, 157, 61, 0.25));
+  border-color: var(--accent);
+}
+
+.action-btn.ready-collect {
+  background: linear-gradient(140deg, #ffca4f, #ff9d3d);
+  color: #1e1b14;
+  border-color: rgba(0, 0, 0, 0.24);
+  animation: btnPulse 0.75s ease-in-out infinite;
+}
+
+@keyframes btnPulse {
+  0%, 100% { box-shadow: 0 8px 18px var(--shadow); }
+  50%       { box-shadow: 0 8px 28px rgba(255, 201, 77, 0.55); }
 }
 
 .modal {
@@ -163,7 +196,7 @@ body {
 }
 
 .modal-panel {
-  width: min(92vw, 460px);
+  width: min(92vw, 510px);
   max-height: 82vh;
   overflow: auto;
   border-radius: 18px;
@@ -187,41 +220,154 @@ body {
 
 .upgrade-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+}
+
+.upg-section-label {
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--upg-accent, var(--ink));
+  opacity: 0.85;
+  padding: 14px 4px 4px;
+}
+
+.upg-section-label:first-child {
+  padding-top: 4px;
 }
 
 .upgrade-item {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 44px 1fr auto;
   gap: 10px;
   align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-left: 3px solid var(--upg-accent, rgba(255, 255, 255, 0.2));
+  border-radius: 14px;
+  padding: 11px 12px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms;
+}
+
+.upgrade-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.04) 50%, transparent 62%);
+  transform: translateX(-120%);
+  transition: transform 550ms ease;
+  pointer-events: none;
+}
+
+.upgrade-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.upgrade-item:hover::after {
+  transform: translateX(120%);
+}
+
+.upg-icon-bubble {
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  padding: 10px;
+  background: color-mix(in srgb, var(--upg-accent, #fff) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--upg-accent, #fff) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
 }
 
-.upgrade-item strong {
-  display: block;
+.upg-body {
+  min-width: 0;
 }
 
-.upgrade-item small {
-  opacity: 0.82;
+.upg-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.upgrade-item button {
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.12);
-  padding: 7px 9px;
+.upg-title {
   font-weight: 700;
-  cursor: pointer;
+  font-size: 0.87rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.upgrade-item button:disabled {
-  opacity: 0.55;
+.upg-level-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--upg-accent, #fff) 20%, transparent);
+  color: var(--upg-accent, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--upg-accent, #fff) 35%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.04em;
+}
+
+.upg-level-badge.maxed {
+  --upg-accent: #fbbf24;
+}
+
+.upg-desc {
+  display: block;
+  font-size: 0.73rem;
+  opacity: 0.65;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upg-buy-btn {
+  flex-shrink: 0;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--upg-accent, #fff) 40%, transparent);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--upg-accent, #fff) 18%, transparent);
+  padding: 8px 11px;
+  font-weight: 800;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, transform 80ms, box-shadow 80ms;
+  font-family: "Russo One", sans-serif;
+}
+
+.upg-buy-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--upg-accent, #fff) 30%, transparent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.upg-buy-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.upg-buy-btn:disabled {
   cursor: not-allowed;
+}
+
+.upg-buy-btn.cant-afford {
+  opacity: 0.4;
+}
+
+.upg-buy-btn.is-maxed {
+  opacity: 0.5;
+  font-family: Manrope, sans-serif;
+  font-size: 0.78rem;
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .modal-actions {

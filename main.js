@@ -1,6 +1,5 @@
 (() => {
   const STORAGE_KEY = "aircraft_mechanic_tycoon_save_v1";
-  const SETTINGS_KEY = "aircraft_mechanic_tycoon_settings_v1";
 
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
@@ -34,8 +33,8 @@
   const upgradeList = document.getElementById("upgradeList");
 
   const WORLD_BASE = { width: 1400, height: 900 };
-  const PLAYER_RADIUS = 20;
-  const INTERACT_RANGE = 90;
+  const PLAYER_RADIUS = 26;
+  const INTERACT_RANGE = 110;
   const MAX_WORKERS = 5;
 
   const AIRCRAFT_TYPES = {
@@ -99,9 +98,16 @@
       repairLevel: 1,
       hangarLevel: 1,
       workerLevel: 0,
+      diagnoseLevel: 1,
+      patienceLevel: 1,
+      comboLevel: 1,
       unlockHelicopter: false,
       unlockJet: false,
       tutorialDone: false,
+      workerSpeedLevel: 1,
+      atcLevel: 1,
+      fuelLevel: 1,
+      eliteLevel: 1,
       lastDailyClaim: "",
       totalRepairs: 0
     },
@@ -263,8 +269,8 @@
     const rows = Math.ceil(count / cols);
     const startX = 280;
     const startY = 190;
-    const xGap = Math.max(150, (size.width - 460) / Math.max(cols - 1, 1));
-    const yGap = Math.max(160, (size.height - 340) / Math.max(rows - 1, 1));
+    const xGap = Math.max(190, (size.width - 460) / Math.max(cols - 1, 1));
+    const yGap = Math.max(190, (size.height - 340) / Math.max(rows - 1, 1));
 
     for (let i = 0; i < count; i += 1) {
       const c = i % cols;
@@ -290,8 +296,17 @@
     const pool = ["small"];
     if (game.state.unlockHelicopter || game.elapsed > 130) pool.push("helicopter");
     if (game.state.unlockJet || game.elapsed > 320) pool.push("jet");
-    const idx = Math.floor(Math.random() * pool.length);
-    return pool[idx];
+    if (pool.length === 1) return "small";
+    // Elite contracts bias toward premium aircraft
+    const w = getEliteWeight();
+    const weights = pool.map((t) => t === "small" ? 1 : w);
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < pool.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return pool[i];
+    }
+    return pool[pool.length - 1];
   }
 
   function spawnAircraft() {
@@ -317,8 +332,8 @@
       targetY: slotInfo.pos.y,
       slot: slotInfo.slotIndex,
       state: "arriving",
-      wait: def.wait * waitScale,
-      waitMax: def.wait * waitScale,
+      wait: def.wait * waitScale * getWaitMultiplier(),
+      waitMax: def.wait * waitScale * getWaitMultiplier(),
       diagnoseTimer: 0,
       repairProgress: 0,
       repairNeed: (3.2 + Math.random() * 1.8) * def.difficulty * hardScale,
@@ -345,10 +360,48 @@
     return 1 + (game.state.combo - 1) * 0.08;
   }
 
+  function getDiagnoseSpeed() {
+    return 1 + (game.state.diagnoseLevel - 1) * 0.35;
+  }
+
+  function getWaitMultiplier() {
+    return 1 + (game.state.patienceLevel - 1) * 0.18;
+  }
+
+  function getComboMax() {
+    return 6 + (game.state.comboLevel - 1);
+  }
+
+  function getComboDecay() {
+    return Math.max(0.05, 0.2 - (game.state.comboLevel - 1) * 0.03);
+  }
+
+  function getWorkerSpeed() {
+    return 120 + (game.state.workerSpeedLevel - 1) * 22;
+  }
+
+  function getWorkerRepairRate() {
+    return 0.7 + (game.state.workerSpeedLevel - 1) * 0.12;
+  }
+
+  function getSpawnInterval() {
+    const difficultyRamp = clamp(game.elapsed * 0.008, 0, 5);
+    const atcBonus = (game.state.atcLevel - 1) * 0.38;
+    return Math.max(1.8, game.spawnBase - difficultyRamp - atcBonus);
+  }
+
+  function getFuelIdleBonus() {
+    return (game.state.fuelLevel - 1) * 6;
+  }
+
+  function getEliteWeight() {
+    return 1 + (game.state.eliteLevel - 1) * 0.35;
+  }
+
   function startDiagnose(aircraft, actor = "player") {
     if (aircraft.state !== "waiting") return;
     aircraft.state = "diagnosing";
-    aircraft.diagnoseTimer = 1 + Math.random() * 0.7;
+    aircraft.diagnoseTimer = (1 + Math.random() * 0.7) / getDiagnoseSpeed();
     aircraft.reservedBy = actor;
     aircraft.flash = 0.4;
     showToast(`${aircraft.repairType} issue detected`);
@@ -380,7 +433,7 @@
 
     const repairDuration = game.elapsed - aircraft.spawnedAt;
     if (repairDuration < 24) {
-      game.state.combo = clamp(game.state.combo + 0.25, 1, 6);
+      game.state.combo = clamp(game.state.combo + 0.25, 1, getComboMax());
       game.state.comboTimer = 12;
     } else {
       game.state.combo = Math.max(1, game.state.combo - 0.1);
@@ -431,7 +484,7 @@
     let hit = null;
     for (const a of game.aircraft) {
       if (!["waiting", "diagnosing", "repairing", "done"].includes(a.state)) continue;
-      if (Math.abs(a.x - point.x) < 54 && Math.abs(a.y - point.y) < 44) {
+      if (Math.abs(a.x - point.x) < 70 && Math.abs(a.y - point.y) < 57) {
         hit = a;
       }
     }
@@ -493,18 +546,18 @@
       const dx = target.x - worker.x;
       const dy = target.y - worker.y;
       const d = Math.hypot(dx, dy);
-      const speed = 120;
+      const speed = getWorkerSpeed();
 
-      if (d > 26) {
+      if (d > 34) {
         worker.x += (dx / d) * speed * dt;
         worker.y += (dy / d) * speed * dt;
       } else {
         if (target.state === "waiting") {
           startDiagnose(target, "worker");
         } else if (target.state === "diagnosing") {
-          target.diagnoseTimer -= dt * 0.8;
+          target.diagnoseTimer -= dt * 0.8 * getDiagnoseSpeed();
         } else if (target.state === "repairing") {
-          target.repairProgress += dt * 0.7;
+          target.repairProgress += dt * getWorkerRepairRate();
         } else if (target.state === "done") {
           collectPayment(target, true);
         }
@@ -681,152 +734,437 @@
     ctx.fillRect(80, 80, game.width - 160, 24);
     ctx.fillRect(80, game.height - 104, game.width - 160, 24);
 
+    // Overhead light fixtures and floor pools
+    const numLights = 5;
+    for (let li = 0; li < numLights; li++) {
+      const lx = 200 + (li / (numLights - 1)) * (game.width - 400);
+      const ly = 92;
+
+      // Floor light pool
+      const poolGrad = ctx.createRadialGradient(lx, ly + 220, 10, lx, ly + 220, 300);
+      poolGrad.addColorStop(0, "rgba(255, 248, 210, 0.13)");
+      poolGrad.addColorStop(0.6, "rgba(255, 248, 210, 0.05)");
+      poolGrad.addColorStop(1, "transparent");
+      ctx.fillStyle = poolGrad;
+      ctx.beginPath();
+      ctx.ellipse(lx, ly + 220, 260, 280, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fixture glow halo
+      const haloGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, 40);
+      haloGrad.addColorStop(0, "rgba(255, 252, 220, 0.85)");
+      haloGrad.addColorStop(0.45, "rgba(255, 235, 170, 0.35)");
+      haloGrad.addColorStop(1, "transparent");
+      ctx.fillStyle = haloGrad;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 40, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fixture housing
+      ctx.fillStyle = "#3a4d5e";
+      ctx.fillRect(lx - 14, ly - 6, 28, 10);
+      ctx.fillStyle = "#c8dae8";
+      ctx.fillRect(lx - 9, ly, 18, 5);
+    }
+
     ctx.restore();
   }
 
   function drawAircraft(a) {
     const p = worldToScreen(a.x, a.y);
-    const size = 54 * a.def.size;
+    const size = 70 * a.def.size;
 
     ctx.save();
     ctx.translate(p.x, p.y);
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+    // Drop shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
     ctx.beginPath();
-    ctx.ellipse(0, 26, size * 1.04, 13, 0, 0, Math.PI * 2);
+    ctx.ellipse(4, 32, size * 1.0, size * 0.18, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const flashAlpha = a.flash > 0 ? 0.22 * Math.sin(a.flash * 16) + 0.25 : 0;
-    if (flashAlpha > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.abs(flashAlpha)})`;
+    // Flash glow
+    const flashAlpha = a.flash > 0 ? Math.abs(0.22 * Math.sin(a.flash * 16) + 0.18) : 0;
+    if (flashAlpha > 0.01) {
+      ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
       ctx.beginPath();
-      ctx.arc(0, 0, size * 1.05, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 1.1, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    const bodyGrad = ctx.createLinearGradient(-size, -size * 0.7, size, size * 0.7);
-    bodyGrad.addColorStop(0, "#f4fbff");
-    bodyGrad.addColorStop(0.45, a.def.color);
-    bodyGrad.addColorStop(1, "#1d3248");
+    const c = a.def.color;
 
     if (a.key === "small") {
-      ctx.fillStyle = bodyGrad;
+      const grad = ctx.createLinearGradient(-size * 0.4, -size, size * 0.4, size);
+      grad.addColorStop(0, "#f0faff");
+      grad.addColorStop(0.28, c);
+      grad.addColorStop(1, "#1a3050");
+
+      // Left swept wing
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.moveTo(0, -size * 0.94);
-      ctx.lineTo(size * 0.22, -size * 0.35);
-      ctx.lineTo(size * 0.95, size * 0.2);
-      ctx.lineTo(size * 0.12, size * 0.85);
-      ctx.lineTo(-size * 0.12, size * 0.85);
-      ctx.lineTo(-size * 0.95, size * 0.2);
-      ctx.lineTo(-size * 0.22, -size * 0.35);
+      ctx.moveTo(-size * 0.07, -size * 0.12);
+      ctx.lineTo(-size * 0.88, size * 0.24);
+      ctx.lineTo(-size * 0.7, size * 0.38);
+      ctx.lineTo(-size * 0.05, size * 0.08);
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = "#1f3246";
-      ctx.fillRect(-size * 0.95, -size * 0.02, size * 1.9, size * 0.15);
-      ctx.fillRect(-size * 0.07, -size * 0.5, size * 0.14, size * 1.2);
+      // Right swept wing
+      ctx.beginPath();
+      ctx.moveTo(size * 0.07, -size * 0.12);
+      ctx.lineTo(size * 0.88, size * 0.24);
+      ctx.lineTo(size * 0.7, size * 0.38);
+      ctx.lineTo(size * 0.05, size * 0.08);
+      ctx.closePath();
+      ctx.fill();
+
+      // Left horizontal stabilizer
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.06, size * 0.6);
+      ctx.lineTo(-size * 0.38, size * 0.76);
+      ctx.lineTo(-size * 0.3, size * 0.86);
+      ctx.lineTo(-size * 0.06, size * 0.73);
+      ctx.closePath();
+      ctx.fill();
+
+      // Right horizontal stabilizer
+      ctx.beginPath();
+      ctx.moveTo(size * 0.06, size * 0.6);
+      ctx.lineTo(size * 0.38, size * 0.76);
+      ctx.lineTo(size * 0.3, size * 0.86);
+      ctx.lineTo(size * 0.06, size * 0.73);
+      ctx.closePath();
+      ctx.fill();
+
+      // Fuselage
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size * 0.14, size * 0.88, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Propeller disc (spinning)
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = "rgba(210, 230, 255, 0.85)";
+      ctx.lineWidth = 3;
+      ctx.save();
+      ctx.rotate(game.time * 14);
+      ctx.beginPath();
+      ctx.moveTo(0, -size * 0.22);
+      ctx.lineTo(0, size * 0.22);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.18, -size * 0.12);
+      ctx.lineTo(size * 0.18, size * 0.12);
+      ctx.stroke();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // Cockpit window
+      ctx.fillStyle = "rgba(120, 200, 255, 0.78)";
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.46, size * 0.1, size * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.03, -size * 0.5, size * 0.04, size * 0.06, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wing leading-edge highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.07, -size * 0.12);
+      ctx.lineTo(-size * 0.84, size * 0.22);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(size * 0.07, -size * 0.12);
+      ctx.lineTo(size * 0.84, size * 0.22);
+      ctx.stroke();
     }
 
     if (a.key === "helicopter") {
-      ctx.fillStyle = bodyGrad;
-      fillRoundedRect(-size * 0.5, -size * 0.42, size, size * 0.95, size * 0.2);
-      ctx.fillRect(-size * 0.9, -size * 0.06, size * 1.8, size * 0.18);
-      ctx.fillStyle = "#152735";
-      ctx.fillRect(-size * 0.08, -size * 0.86, size * 0.16, size * 0.48);
-      ctx.fillRect(-size * 1.04, -size * 0.9, size * 2.08, size * 0.08);
-      ctx.fillStyle = "#95a9b8";
-      ctx.fillRect(-size * 0.9, size * 0.56, size * 1.8, size * 0.08);
-    }
+      const grad = ctx.createLinearGradient(-size * 0.4, -size * 0.5, size * 0.4, size * 0.5);
+      grad.addColorStop(0, "#e8fff2");
+      grad.addColorStop(0.32, c);
+      grad.addColorStop(1, "#143325");
 
-    if (a.key === "jet") {
-      ctx.fillStyle = bodyGrad;
+      // Tail boom
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.moveTo(0, -size);
-      ctx.lineTo(size * 0.26, -size * 0.2);
-      ctx.lineTo(size * 0.82, size * 0.2);
-      ctx.lineTo(size * 0.2, size * 0.84);
-      ctx.lineTo(-size * 0.2, size * 0.84);
-      ctx.lineTo(-size * 0.82, size * 0.2);
-      ctx.lineTo(-size * 0.26, -size * 0.2);
+      ctx.moveTo(-size * 0.11, size * 0.24);
+      ctx.lineTo(size * 0.11, size * 0.24);
+      ctx.lineTo(size * 0.055, size * 0.88);
+      ctx.lineTo(-size * 0.055, size * 0.88);
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = "#192a3a";
-      ctx.fillRect(-size * 1.02, -size * 0.06, size * 2.04, size * 0.16);
-      ctx.fillRect(-size * 0.1, -size * 0.54, size * 0.2, size * 1.28);
-      ctx.fillStyle = "#ffb156";
-      ctx.fillRect(-size * 0.16, size * 0.56, size * 0.32, size * 0.2);
+      // Main cabin body
+      ctx.fillStyle = grad;
+      fillRoundedRect(-size * 0.4, -size * 0.36, size * 0.8, size * 0.66, size * 0.18);
+
+      // Main rotor blades (3-blade, animated)
+      ctx.save();
+      ctx.rotate(game.time * 4.5);
+      ctx.strokeStyle = "rgba(30, 45, 35, 0.82)";
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      for (let b = 0; b < 3; b++) {
+        ctx.save();
+        ctx.rotate((b / 3) * Math.PI * 2);
+        ctx.beginPath();
+        ctx.moveTo(0, -size * 0.09);
+        ctx.lineTo(0, -size * 0.95);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+
+      // Rotor hub
+      ctx.fillStyle = "#263830";
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#4a6050";
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tail rotor (small, animated)
+      ctx.save();
+      ctx.translate(0, size * 0.88);
+      ctx.rotate(game.time * 9);
+      ctx.strokeStyle = "rgba(30, 45, 35, 0.75)";
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(0, -size * 0.19);
+      ctx.lineTo(0, size * 0.19);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.19, 0);
+      ctx.lineTo(size * 0.19, 0);
+      ctx.stroke();
+      ctx.restore();
+
+      // Skid struts
+      ctx.strokeStyle = "#1e2e28";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.46, size * 0.22);
+      ctx.lineTo(-size * 0.46, -size * 0.12);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(size * 0.46, size * 0.22);
+      ctx.lineTo(size * 0.46, -size * 0.12);
+      ctx.stroke();
+      // Skid rails
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.52, -size * 0.1);
+      ctx.lineTo(-size * 0.24, -size * 0.1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(size * 0.52, -size * 0.1);
+      ctx.lineTo(size * 0.24, -size * 0.1);
+      ctx.stroke();
+
+      // Front windshield
+      ctx.fillStyle = "rgba(120, 205, 255, 0.74)";
+      fillRoundedRect(-size * 0.28, -size * 0.3, size * 0.56, size * 0.24, size * 0.07);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.38)";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.07, -size * 0.25, size * 0.12, size * 0.05, -0.2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    fillRoundedRect(-size * 0.24, -size * 0.52, size * 0.48, size * 0.2, size * 0.08);
+    if (a.key === "jet") {
+      const grad = ctx.createLinearGradient(-size * 0.5, -size, size * 0.5, size * 0.7);
+      grad.addColorStop(0, "#fff5ee");
+      grad.addColorStop(0.28, c);
+      grad.addColorStop(1, "#2a1808");
+
+      // Delta wing body
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(size * 0.16, -size * 0.58);
+      ctx.lineTo(size * 0.9, size * 0.5);
+      ctx.lineTo(size * 0.42, size * 0.6);
+      ctx.lineTo(size * 0.14, size * 0.82);
+      ctx.lineTo(-size * 0.14, size * 0.82);
+      ctx.lineTo(-size * 0.42, size * 0.6);
+      ctx.lineTo(-size * 0.9, size * 0.5);
+      ctx.lineTo(-size * 0.16, -size * 0.58);
+      ctx.closePath();
+      ctx.fill();
+
+      // Fuselage center spine
+      ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.18, size * 0.07, size * 0.74, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Engine exhaust glow
+      const engineBright = a.state === "done" ? 1.0 : 0.55;
+      const exGrad1 = ctx.createRadialGradient(-size * 0.28, size * 0.72, 0, -size * 0.28, size * 0.72, size * 0.15);
+      exGrad1.addColorStop(0, `rgba(255, 180, 50, ${engineBright})`);
+      exGrad1.addColorStop(0.5, `rgba(255, 100, 20, ${engineBright * 0.6})`);
+      exGrad1.addColorStop(1, "transparent");
+      ctx.fillStyle = exGrad1;
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.28, size * 0.74, size * 0.1, size * 0.07, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      const exGrad2 = ctx.createRadialGradient(size * 0.28, size * 0.72, 0, size * 0.28, size * 0.72, size * 0.15);
+      exGrad2.addColorStop(0, `rgba(255, 180, 50, ${engineBright})`);
+      exGrad2.addColorStop(0.5, `rgba(255, 100, 20, ${engineBright * 0.6})`);
+      exGrad2.addColorStop(1, "transparent");
+      ctx.fillStyle = exGrad2;
+      ctx.beginPath();
+      ctx.ellipse(size * 0.28, size * 0.74, size * 0.1, size * 0.07, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Canopy
+      ctx.fillStyle = "rgba(120, 200, 255, 0.76)";
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.5, size * 0.09, size * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.48)";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.03, -size * 0.56, size * 0.04, size * 0.08, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wing leading-edge highlights
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(size * 0.9, size * 0.5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(-size * 0.9, size * 0.5);
+      ctx.stroke();
+    }
 
     ctx.restore();
 
-    const barW = 96;
+    const barW = 120;
     const barX = p.x - barW / 2;
-    const barY = p.y - size - 30;
+    const barY = p.y - size - 36;
 
-    ctx.fillStyle = "rgba(0,0,0,0.42)";
-    fillRoundedRect(barX, barY, barW, 12, 6);
+    ctx.fillStyle = "rgba(0,0,0,0.52)";
+    fillRoundedRect(barX - 1, barY - 1, barW + 2, 14, 7);
 
     if (a.state === "repairing") {
       const ratio = clamp(a.repairProgress / a.repairNeed, 0, 1);
-      ctx.fillStyle = "#56d8c5";
+      const rGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+      rGrad.addColorStop(0, "#56d8c5");
+      rGrad.addColorStop(1, "#8affcd");
+      ctx.fillStyle = rGrad;
       fillRoundedRect(barX, barY, barW * ratio, 12, 6);
       ctx.fillStyle = "#dff6ff";
-      ctx.font = "12px Manrope";
+      ctx.font = "bold 11px Manrope";
       ctx.fillText(`Repair ${Math.floor(ratio * 100)}%`, barX, barY - 5);
     } else {
       const ratio = clamp(a.wait / a.waitMax, 0, 1);
-      ctx.fillStyle = ratio < 0.3 ? "#ff7e6b" : "#ffc94d";
+      ctx.fillStyle = ratio < 0.3 ? "#ff7e6b" : ratio < 0.55 ? "#ffc94d" : "#72e88a";
       fillRoundedRect(barX, barY, barW * ratio, 12, 6);
-      ctx.fillStyle = "#dff6ff";
-      ctx.font = "12px Manrope";
-      if (a.state === "waiting") {
-        ctx.fillText(`${a.repairType} check`, barX, barY - 5);
-      } else if (a.state === "diagnosing") {
-        ctx.fillText("Diagnosing...", barX, barY - 5);
-      } else if (a.state === "done") {
-        ctx.fillText("Ready for payment", barX, barY - 5);
-      }
+      ctx.fillStyle = a.state === "done" ? "#ffd700" : "#dff6ff";
+      ctx.font = "bold 11px Manrope";
+      if (a.state === "waiting") ctx.fillText(`${a.repairType} check`, barX, barY - 5);
+      else if (a.state === "diagnosing") ctx.fillText("Diagnosing...", barX, barY - 5);
+      else if (a.state === "done") ctx.fillText("Collect payment!", barX, barY - 5);
     }
   }
 
   function drawPlayer() {
     const p = worldToScreen(game.player.x, game.player.y);
-    const bob = Math.sin(game.player.step) * 2.4;
+    const bob = Math.sin(game.player.step) * 2.8;
+    const armSwing = Math.sin(game.player.step * 1.1) * 7;
 
     ctx.save();
     ctx.translate(p.x, p.y + bob);
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.33)";
+    // Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
     ctx.beginPath();
-    ctx.ellipse(0, 30, 23, 9, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 38, 20, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "#ffdb84";
-    ctx.beginPath();
-    ctx.arc(0, -18, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    const suitGrad = ctx.createLinearGradient(-16, -10, 16, 28);
-    suitGrad.addColorStop(0, "#49b6ff");
-    suitGrad.addColorStop(1, "#2f7bc0");
-    ctx.fillStyle = suitGrad;
-    fillRoundedRect(-16, -6, 32, 30, 8);
-
-    ctx.fillStyle = "#1f2f42";
-    const armOffset = Math.sin(game.player.step * 1.2) * 6;
-    fillRoundedRect(-22, 2 + armOffset, 8, 17, 4);
-    fillRoundedRect(14, 2 - armOffset, 8, 17, 4);
-
+    // Legs
     ctx.fillStyle = "#182634";
-    fillRoundedRect(-13, 24, 10, 14, 4);
-    fillRoundedRect(3, 24, 10, 14, 4);
+    fillRoundedRect(-14, 26, 11, 18, 4);
+    fillRoundedRect(3, 26, 11, 18, 4);
+    // Boots
+    ctx.fillStyle = "#0d1a28";
+    fillRoundedRect(-15, 40, 12, 7, 3);
+    fillRoundedRect(3, 40, 12, 7, 3);
 
-    ctx.fillStyle = "#d8e6ff";
-    fillRoundedRect(game.player.dir > 0 ? 10 : -17, -2, 8, 6, 3);
+    // Body — hi-vis vest
+    const vestGrad = ctx.createLinearGradient(-15, -10, 15, 28);
+    vestGrad.addColorStop(0, "#ffd428");
+    vestGrad.addColorStop(0.4, "#e8a500");
+    vestGrad.addColorStop(1, "#b07600");
+    ctx.fillStyle = vestGrad;
+    fillRoundedRect(-15, -10, 30, 37, 7);
+
+    // Reflective stripes
+    ctx.fillStyle = "rgba(255,255,255,0.32)";
+    fillRoundedRect(-15, 3, 30, 4, 2);
+    fillRoundedRect(-15, 14, 30, 4, 2);
+
+    // Arms
+    ctx.fillStyle = "#1e4060";
+    fillRoundedRect(-24, -5 + armSwing, 10, 22, 4);
+    fillRoundedRect(14, -5 - armSwing, 10, 22, 4);
+    // Gloves
+    ctx.fillStyle = "#d05a16";
+    fillRoundedRect(-24, 14 + armSwing, 10, 7, 3);
+    fillRoundedRect(14, 14 - armSwing, 10, 7, 3);
+
+    // Neck
+    ctx.fillStyle = "#f0b880";
+    fillRoundedRect(-5, -18, 10, 10, 3);
+
+    // Head
+    ctx.fillStyle = "#f0b880";
+    ctx.beginPath();
+    ctx.arc(0, -26, 14, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hard hat dome
+    const hatGrad = ctx.createLinearGradient(-14, -44, 14, -30);
+    hatGrad.addColorStop(0, "#ffe030");
+    hatGrad.addColorStop(0.6, "#e8a500");
+    hatGrad.addColorStop(1, "#b07600");
+    ctx.fillStyle = hatGrad;
+    ctx.beginPath();
+    ctx.arc(0, -33, 15, Math.PI, 0);
+    ctx.lineTo(16, -26);
+    ctx.lineTo(-16, -26);
+    ctx.closePath();
+    ctx.fill();
+    // Hat brim
+    ctx.fillStyle = "#b07600";
+    ctx.fillRect(-18, -28, 36, 4);
+    // Hat shine
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.beginPath();
+    ctx.arc(-4, -38, 5, Math.PI, 0);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = "#1a0e00";
+    ctx.beginPath();
+    ctx.arc(-5, -25, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(5, -25, 2, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
   }
@@ -834,18 +1172,58 @@
   function drawWorkers() {
     for (const worker of game.workers) {
       const p = worldToScreen(worker.x, worker.y);
+      const bob = Math.sin(worker.pulse) * 1.6;
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.fillStyle = "rgba(0,0,0,0.24)";
+      ctx.translate(p.x, p.y + bob);
+
+      // Shadow
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
       ctx.beginPath();
-      ctx.ellipse(0, 20, 18, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 28, 16, 6, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#83f0cf";
+
+      // Legs
+      ctx.fillStyle = "#163828";
+      fillRoundedRect(-11, 16, 9, 14, 3);
+      fillRoundedRect(2, 16, 9, 14, 3);
+
+      // Body (green overalls)
+      const bodyGrad = ctx.createLinearGradient(-11, -6, 11, 18);
+      bodyGrad.addColorStop(0, "#88efbf");
+      bodyGrad.addColorStop(1, "#288060");
+      ctx.fillStyle = bodyGrad;
+      fillRoundedRect(-12, -6, 24, 24, 6);
+
+      // Arms
+      ctx.fillStyle = "#1e6040";
+      fillRoundedRect(-20, -4, 9, 16, 3);
+      fillRoundedRect(11, -4, 9, 16, 3);
+
+      // Head
+      ctx.fillStyle = "#fad0a0";
       ctx.beginPath();
-      ctx.arc(0, -8 + Math.sin(worker.pulse) * 1.8, 13, 0, Math.PI * 2);
+      ctx.arc(0, -16, 12, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#12303f";
-      fillRoundedRect(-10, 5, 20, 15, 5);
+
+      // Cyan hard hat
+      const helmetGrad = ctx.createLinearGradient(-12, -30, 12, -20);
+      helmetGrad.addColorStop(0, "#30d8d0");
+      helmetGrad.addColorStop(1, "#0f9898");
+      ctx.fillStyle = helmetGrad;
+      ctx.beginPath();
+      ctx.arc(0, -21, 13, Math.PI, 0);
+      ctx.lineTo(14, -17);
+      ctx.lineTo(-14, -17);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#0c8080";
+      ctx.fillRect(-15, -19, 30, 3);
+      // Helmet shine
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      ctx.beginPath();
+      ctx.arc(-3, -26, 4, Math.PI, 0);
+      ctx.fill();
+
       ctx.restore();
     }
   }
@@ -874,8 +1252,12 @@
     fillRoundedRect(p.x - 58, p.y - 18, 116, 26, 10);
     ctx.fillStyle = "#eff7ff";
     ctx.font = "12px Manrope";
-    const msg = a.state === "done" ? "Hold to collect" : "Hold to repair";
-    ctx.fillText(msg, p.x - 42, p.y);
+    let msg;
+    if (a.state === "waiting") msg = "Tap to diagnose";
+    else if (a.state === "diagnosing") msg = "Diagnosing...";
+    else if (a.state === "repairing") msg = "Hold to repair";
+    else msg = "Tap to collect";
+    ctx.fillText(msg, p.x - 48, p.y);
     ctx.restore();
   }
 
@@ -888,7 +1270,7 @@
       ctx.strokeStyle = "rgba(255,255,255,0.2)";
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 8]);
-      ctx.strokeRect(s.x - 68, s.y - 50, 136, 100);
+      ctx.strokeRect(s.x - 88, s.y - 65, 176, 130);
       ctx.setLineDash([]);
     }
     ctx.restore();
@@ -918,102 +1300,285 @@
     xpText.textContent = `${Math.floor(game.state.xp)} / ${game.state.xpToNext} XP`;
     xpFill.style.width = `${(game.state.xp / game.state.xpToNext) * 100}%`;
     comboValue.textContent = `x${getComboMultiplier().toFixed(1)}`;
+
+    const nearest = nearestInteractable();
+    const inRange = nearest.target && nearest.distance <= INTERACT_RANGE + 30;
+    interactBtn.classList.remove("ready-diagnose", "ready-repair", "ready-collect");
+    if (inRange) {
+      const s = nearest.target.state;
+      if (s === "waiting") {
+        interactBtn.textContent = "Diagnose";
+        interactBtn.classList.add("ready-diagnose");
+      } else if (s === "repairing") {
+        interactBtn.textContent = "Hold to Repair";
+        interactBtn.classList.add("ready-repair");
+      } else if (s === "done") {
+        interactBtn.textContent = "Collect $$$";
+        interactBtn.classList.add("ready-collect");
+      } else {
+        interactBtn.textContent = "Repair / Collect";
+      }
+    } else {
+      interactBtn.textContent = "Repair / Collect";
+    }
   }
 
   function updateUpgradeUI() {
-    const defs = [
+    const CATEGORY_COLORS = {
+      operations: "#56d8c5",
+      economy: "#fbbf24",
+      expansion: "#b89dff",
+      contracts: "#ff9f4d"
+    };
+
+    const sections = [
       {
-        id: "speed",
-        title: "Mechanic Speed",
-        desc: `Move faster across the hangar (Lv ${game.state.speedLevel})`,
-        cost: Math.floor(120 * Math.pow(1.55, game.state.speedLevel - 1)),
-        onBuy: () => {
-          game.state.speedLevel += 1;
-        },
-        available: true
+        label: "Operations",
+        cat: "operations",
+        items: [
+          {
+            id: "speed",
+            icon: "👟",
+            title: "Mechanic Speed",
+            desc: "Move faster across the hangar",
+            level: game.state.speedLevel,
+            cost: Math.floor(120 * Math.pow(1.55, game.state.speedLevel - 1)),
+            onBuy: () => { game.state.speedLevel += 1; },
+            available: true
+          },
+          {
+            id: "repair",
+            icon: "🔧",
+            title: "Tool Upgrade",
+            desc: "Boost repair speed",
+            level: game.state.repairLevel,
+            cost: Math.floor(140 * Math.pow(1.6, game.state.repairLevel - 1)),
+            onBuy: () => { game.state.repairLevel += 1; },
+            available: true
+          },
+          {
+            id: "diagnose",
+            icon: "🔬",
+            title: "Diagnostic Tools",
+            desc: "Speed up aircraft diagnose time",
+            level: game.state.diagnoseLevel,
+            cost: Math.floor(130 * Math.pow(1.58, game.state.diagnoseLevel - 1)),
+            onBuy: () => { game.state.diagnoseLevel += 1; },
+            available: true
+          },
+          {
+            id: "patience",
+            icon: "🤝",
+            title: "Client Relations",
+            desc: "Aircraft wait longer before leaving",
+            level: game.state.patienceLevel,
+            cost: Math.floor(200 * Math.pow(1.65, game.state.patienceLevel - 1)),
+            onBuy: () => { game.state.patienceLevel += 1; },
+            available: true
+          },
+          {
+            id: "combo",
+            icon: "⚡",
+            title: "Combo Training",
+            desc: "Raise combo cap and slow decay",
+            level: game.state.comboLevel,
+            cost: Math.floor(250 * Math.pow(1.7, game.state.comboLevel - 1)),
+            onBuy: () => { game.state.comboLevel += 1; },
+            available: true
+          }
+        ]
       },
       {
-        id: "repair",
-        title: "Tool Upgrade",
-        desc: `Boost repair speed (Lv ${game.state.repairLevel})`,
-        cost: Math.floor(140 * Math.pow(1.6, game.state.repairLevel - 1)),
-        onBuy: () => {
-          game.state.repairLevel += 1;
-        },
-        available: true
+        label: "Economy",
+        cat: "economy",
+        items: [
+          {
+            id: "value",
+            icon: "💎",
+            title: "Premium Parts",
+            desc: "Increase payout per repair",
+            level: game.state.valueLevel,
+            cost: Math.floor(160 * Math.pow(1.62, game.state.valueLevel - 1)),
+            onBuy: () => { game.state.valueLevel += 1; },
+            available: true
+          },
+          {
+            id: "fuel",
+            icon: "⛽",
+            title: "Fuel Bay",
+            desc: "Boosts passive idle income",
+            level: game.state.fuelLevel,
+            cost: Math.floor(420 * Math.pow(1.72, game.state.fuelLevel - 1)),
+            onBuy: () => { game.state.fuelLevel += 1; },
+            available: true
+          },
+          {
+            id: "elite",
+            icon: "⭐",
+            title: "Elite Contracts",
+            desc: "Higher-value aircraft arrive more often",
+            level: game.state.eliteLevel,
+            cost: Math.floor(600 * Math.pow(1.8, game.state.eliteLevel - 1)),
+            onBuy: () => { game.state.eliteLevel += 1; },
+            available: game.state.unlockHelicopter || game.state.unlockJet
+          }
+        ]
       },
       {
-        id: "value",
-        title: "Premium Parts",
-        desc: `Increase payout per repair (Lv ${game.state.valueLevel})`,
-        cost: Math.floor(160 * Math.pow(1.62, game.state.valueLevel - 1)),
-        onBuy: () => {
-          game.state.valueLevel += 1;
-        },
-        available: true
+        label: "Hangar & Staff",
+        cat: "expansion",
+        items: [
+          {
+            id: "hangar",
+            icon: "🏗️",
+            title: "Expand Hangar",
+            desc: "More parking slots",
+            level: game.state.hangarLevel,
+            cost: Math.floor(320 * Math.pow(1.78, game.state.hangarLevel - 1)),
+            onBuy: () => { game.state.hangarLevel += 1; },
+            available: true
+          },
+          {
+            id: "worker",
+            icon: "👷",
+            title: "Hire Worker",
+            desc: `Auto-repair nearby aircraft (${game.state.workerLevel}/${MAX_WORKERS})`,
+            level: game.state.workerLevel,
+            cost: Math.floor(440 * Math.pow(1.86, game.state.workerLevel)),
+            onBuy: () => { game.state.workerLevel += 1; },
+            available: game.state.workerLevel < MAX_WORKERS
+          },
+          {
+            id: "workerSpeed",
+            icon: "🏃",
+            title: "Worker Training",
+            desc: "Workers move and repair faster",
+            level: game.state.workerSpeedLevel,
+            cost: Math.floor(350 * Math.pow(1.7, game.state.workerSpeedLevel - 1)),
+            onBuy: () => { game.state.workerSpeedLevel += 1; },
+            available: game.state.workerLevel > 0
+          },
+          {
+            id: "atc",
+            icon: "📡",
+            title: "Air Traffic Control",
+            desc: "Aircraft arrive more frequently",
+            level: game.state.atcLevel,
+            cost: Math.floor(280 * Math.pow(1.65, game.state.atcLevel - 1)),
+            onBuy: () => { game.state.atcLevel += 1; },
+            available: true
+          }
+        ]
       },
       {
-        id: "hangar",
-        title: "Expand Hangar",
-        desc: `More parking slots (Lv ${game.state.hangarLevel})`,
-        cost: Math.floor(320 * Math.pow(1.78, game.state.hangarLevel - 1)),
-        onBuy: () => {
-          game.state.hangarLevel += 1;
-        },
-        available: true
-      },
-      {
-        id: "worker",
-        title: "Hire Worker",
-        desc: `Auto-repair nearby aircraft (${game.state.workerLevel}/${MAX_WORKERS})`,
-        cost: Math.floor(440 * Math.pow(1.86, game.state.workerLevel)),
-        onBuy: () => {
-          game.state.workerLevel += 1;
-        },
-        available: game.state.workerLevel < MAX_WORKERS
-      },
-      {
-        id: "unlockHelicopter",
-        title: "Unlock Helicopters",
-        desc: "Higher challenge and payout.",
-        cost: 900,
-        onBuy: () => {
-          game.state.unlockHelicopter = true;
-        },
-        available: !game.state.unlockHelicopter
-      },
-      {
-        id: "unlockJet",
-        title: "Unlock Jets",
-        desc: "Top-tier contracts and big money.",
-        cost: 2200,
-        onBuy: () => {
-          game.state.unlockJet = true;
-        },
-        available: !game.state.unlockJet && game.state.unlockHelicopter
+        label: "Unlock Aircraft",
+        cat: "contracts",
+        items: [
+          {
+            id: "unlockHelicopter",
+            icon: "🚁",
+            title: "Unlock Helicopters",
+            desc: "Higher challenge and payout",
+            level: game.state.unlockHelicopter ? 1 : 0,
+            cost: 900,
+            onBuy: () => { game.state.unlockHelicopter = true; },
+            available: !game.state.unlockHelicopter
+          },
+          {
+            id: "unlockJet",
+            icon: "✈️",
+            title: "Unlock Jets",
+            desc: "Top-tier contracts and big money",
+            level: game.state.unlockJet ? 1 : 0,
+            cost: 2200,
+            onBuy: () => { game.state.unlockJet = true; },
+            available: !game.state.unlockJet && game.state.unlockHelicopter
+          }
+        ]
       }
     ];
 
     upgradeList.innerHTML = "";
-    for (const def of defs) {
-      const item = document.createElement("div");
-      item.className = "upgrade-item";
-      const details = document.createElement("div");
-      details.innerHTML = `<strong>${def.title}</strong><small>${def.desc}</small>`;
-      const btn = document.createElement("button");
-      btn.textContent = def.available ? `Buy ${fmtMoney(def.cost)}` : "Maxed";
-      btn.disabled = !def.available || game.state.money < def.cost;
-      btn.addEventListener("click", () => {
-        if (!def.available || game.state.money < def.cost) return;
-        game.state.money -= def.cost;
-        def.onBuy();
-        playSound("upgrade");
-        showToast(`${def.title} upgraded`);
-        updateUpgradeUI();
-      });
-      item.appendChild(details);
-      item.appendChild(btn);
-      upgradeList.appendChild(item);
+
+    for (const section of sections) {
+      const accentColor = CATEGORY_COLORS[section.cat];
+
+      const sectionHeader = document.createElement("div");
+      sectionHeader.className = "upg-section-label";
+      sectionHeader.textContent = section.label;
+      sectionHeader.style.setProperty("--upg-accent", accentColor);
+      upgradeList.appendChild(sectionHeader);
+
+      for (const def of section.items) {
+        const isMaxed = !def.available;
+        const canAfford = game.state.money >= def.cost;
+
+        const item = document.createElement("div");
+        item.className = `upgrade-item upg-cat-${section.cat}`;
+        item.style.setProperty("--upg-accent", accentColor);
+
+        // Icon bubble
+        const iconBubble = document.createElement("div");
+        iconBubble.className = "upg-icon-bubble";
+        iconBubble.textContent = def.icon;
+
+        // Body
+        const body = document.createElement("div");
+        body.className = "upg-body";
+
+        const titleRow = document.createElement("div");
+        titleRow.className = "upg-title-row";
+
+        const titleEl = document.createElement("span");
+        titleEl.className = "upg-title";
+        titleEl.textContent = def.title;
+
+        const levelBadge = document.createElement("span");
+        levelBadge.className = "upg-level-badge";
+        if (isMaxed) {
+          levelBadge.textContent = "MAX";
+          levelBadge.classList.add("maxed");
+        } else {
+          levelBadge.textContent = `Lv ${def.level}`;
+        }
+
+        titleRow.appendChild(titleEl);
+        titleRow.appendChild(levelBadge);
+
+        const descEl = document.createElement("small");
+        descEl.className = "upg-desc";
+        descEl.textContent = def.desc;
+
+        body.appendChild(titleRow);
+        body.appendChild(descEl);
+
+        // Buy button
+        const btn = document.createElement("button");
+        btn.className = "upg-buy-btn";
+        if (isMaxed) {
+          btn.textContent = "Maxed";
+          btn.classList.add("is-maxed");
+          btn.disabled = true;
+        } else {
+          btn.textContent = fmtMoney(def.cost);
+          btn.disabled = !canAfford;
+          if (!canAfford) btn.classList.add("cant-afford");
+        }
+
+        btn.addEventListener("click", () => {
+          if (!def.available || game.state.money < def.cost) return;
+          game.state.money -= def.cost;
+          def.onBuy();
+          playSound("upgrade");
+          showToast(`${def.title} upgraded!`);
+          updateUpgradeUI();
+        });
+
+        item.appendChild(iconBubble);
+        item.appendChild(body);
+        item.appendChild(btn);
+        upgradeList.appendChild(item);
+      }
     }
   }
 
@@ -1024,7 +1589,6 @@
       settings: game.settings
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(game.settings));
   }
 
   function loadGame() {
@@ -1076,7 +1640,7 @@
     game.idleTimer += dt;
     if (game.idleTimer < 1) return;
     game.idleTimer = 0;
-    const amount = (game.state.workerLevel * 5) + (game.state.hangarLevel * 2);
+    const amount = (game.state.workerLevel * 5) + (game.state.hangarLevel * 2) + getFuelIdleBonus();
     if (amount > 0) {
       game.state.money += amount;
     }
@@ -1086,7 +1650,7 @@
     if (game.state.combo > 1) {
       game.state.comboTimer -= dt;
       if (game.state.comboTimer <= 0) {
-        game.state.combo = Math.max(1, game.state.combo - 0.2);
+        game.state.combo = Math.max(1, game.state.combo - getComboDecay());
         game.state.comboTimer = 2.5;
       }
     }
@@ -1094,9 +1658,7 @@
 
   function updateSpawn(dt) {
     game.spawnTimer += dt;
-    const difficultyRamp = clamp(game.elapsed * 0.008, 0, 5);
-    const minInterval = 2.4;
-    const interval = Math.max(minInterval, game.spawnBase - difficultyRamp);
+    const interval = getSpawnInterval();
     if (game.spawnTimer >= interval) {
       game.spawnTimer = 0;
       spawnAircraft();
