@@ -3250,15 +3250,19 @@
       activeId: null,
       centerX: 0,
       centerY: 0,
-      radius: 54
+      radius: 54,
+      thumbCenter: 45
     };
 
     function resetJoy() {
       game.input.joystickActive = false;
       game.input.joyX = 0;
       game.input.joyY = 0;
-      joystickThumb.style.left = "45px";
-      joystickThumb.style.top = "45px";
+      const bw = joystickBase.offsetWidth;
+      const tw = joystickThumb.offsetWidth;
+      const center = Math.round((bw - tw) / 2);
+      joystickThumb.style.left = `${center}px`;
+      joystickThumb.style.top = `${center}px`;
     }
 
     joystickArea.addEventListener("pointerdown", (ev) => {
@@ -3269,6 +3273,8 @@
       const rect = joystickBase.getBoundingClientRect();
       joy.centerX = rect.left + rect.width / 2;
       joy.centerY = rect.top + rect.height / 2;
+      joy.thumbCenter = Math.round((rect.width - joystickThumb.offsetWidth) / 2);
+      joy.radius = rect.width / 2 - joystickThumb.offsetWidth / 2 - 2;
       joystickArea.setPointerCapture(ev.pointerId);
     });
 
@@ -3282,8 +3288,8 @@
       const ly = dy * limited;
       game.input.joyX = lx / joy.radius;
       game.input.joyY = ly / joy.radius;
-      joystickThumb.style.left = `${45 + lx}px`;
-      joystickThumb.style.top = `${45 + ly}px`;
+      joystickThumb.style.left = `${joy.thumbCenter + lx}px`;
+      joystickThumb.style.top = `${joy.thumbCenter + ly}px`;
     });
 
     function joyEnd(ev) {
