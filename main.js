@@ -738,11 +738,20 @@
     game.pause.manual = false;
     startForcedPause("3 strikes. You are fired.", 3.5);
     showToast("You are fired. Restarting...");
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      state: createFiredResetState(),
-      elapsed: 0,
-      settings: game.settings
-    }));
+
+    // Reset progression immediately so any follow-up save keeps the wiped state.
+    game.state = createFiredResetState();
+    game.elapsed = 0;
+    game.dayTracker.currentDay = 1;
+    game.dayTracker.season = getCurrentSeason();
+    game.aircraft = [];
+    game.workers = [];
+    game.particles = [];
+    game.incident.active = false;
+    game.incident.type = "";
+    saveGame();
+    updateUpgradeUI();
+    updateUI();
 
     setTimeout(() => {
       window.location.reload();
@@ -1824,7 +1833,7 @@
     ctx.restore();
   }
 
-  function drawFiredTanOverlay() {
+  function drawFiredScottyOverlay() {
     const t = game.sessionEndTimer;
     const entrance = clamp(t / 0.95, 0, 1);
     const stomp = Math.abs(Math.sin(t * 8.5));
@@ -1944,7 +1953,7 @@
     ctx.font = "bold 10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("TAN", 0, -4);
+    ctx.fillText("SCOTTY", 0, -4);
 
     for (let i = 0; i < 3; i += 1) {
       const puffX = -44 + i * 20;
@@ -1975,7 +1984,7 @@
 
     ctx.fillStyle = "rgba(255, 233, 200, 0.94)";
     ctx.font = `bold ${Math.min(24, game.viewWidth * 0.034)}px Manrope`;
-    ctx.fillText("Tan storms in and shuts the whole hangar down", 0, 114);
+    ctx.fillText("Scotty storms in and shuts the whole hangar down", 0, 114);
     ctx.restore();
 
     ctx.restore();
@@ -2006,7 +2015,7 @@
     }
 
     if (game.sessionEnded) {
-      drawFiredTanOverlay();
+      drawFiredScottyOverlay();
       return;
     }
 
@@ -2494,7 +2503,7 @@
     }
   }
 
-  const TAN_LINES = [
+  const SCOTTY_LINES = [
     "HURRY UP!! We have planes waiting!!",
     "You can't do that job — that's TOO HARD for you!",
     "WHAT ARE YOU DOING?! Move faster!!",
@@ -2513,7 +2522,7 @@
         b.phase = "entering";
         b.y = game.viewHeight * 0.45;
         b.x = -90;
-        b.msgIndex = Math.floor(Math.random() * TAN_LINES.length);
+        b.msgIndex = Math.floor(Math.random() * SCOTTY_LINES.length);
         b.timer = 0;
       }
       return;
@@ -2526,7 +2535,7 @@
         b.phase = "yelling";
         b.timer = 3.5;
         b.shake = 3.5;
-        showToast(`Tan: "${TAN_LINES[b.msgIndex]}"`);
+        showToast(`Scotty: "${SCOTTY_LINES[b.msgIndex]}"`);
         playSound("alert");
         vibrate([80, 40, 80]);
       }
@@ -2676,11 +2685,11 @@
     ctx.font = "bold 9px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("TAN", 0, 0);
+    ctx.fillText("SCOTTY", 0, 0);
 
     // Speech bubble (during yelling phase)
     if (b.phase === "yelling") {
-      const msg = TAN_LINES[b.msgIndex];
+      const msg = SCOTTY_LINES[b.msgIndex];
       const maxW = 200;
       ctx.font = "bold 12px sans-serif";
       ctx.textAlign = "left";
