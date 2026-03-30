@@ -234,6 +234,7 @@
       season: "winter"
     },
     sessionEnded: false,
+    sessionEndTimer: 0,
     player: {
       x: 320,
       y: 380,
@@ -572,6 +573,33 @@
     return `Buy ${longTitle} or ${shortTitle}`;
   }
 
+  function getActiveWeatherItems() {
+    const season = getSeasonConfig();
+    const activeItems = [];
+    const longRemain = getWeatherItemRemaining(season.longItem.stateKey);
+    const shortRemain = getWeatherItemRemaining(season.shortItem.stateKey);
+
+    if (longRemain > 0) {
+      activeItems.push({
+        icon: season.longItem.icon,
+        label: season.longItem.title,
+        remaining: longRemain,
+        accent: season.accent
+      });
+    }
+
+    if (shortRemain > 0) {
+      activeItems.push({
+        icon: season.shortItem.icon,
+        label: season.shortItem.title,
+        remaining: shortRemain,
+        accent: season.accent
+      });
+    }
+
+    return activeItems;
+  }
+
   function buyWeatherItem(item) {
     game.state[item.stateKey] = Math.max(game.state[item.stateKey], game.elapsed) + item.duration;
     return `${item.title} active for ${formatTimer(getWeatherItemRemaining(item.stateKey))}`;
@@ -706,6 +734,7 @@
   function fireAndRestart() {
     if (game.sessionEnded) return;
     game.sessionEnded = true;
+    game.sessionEndTimer = 0;
     game.pause.manual = false;
     startForcedPause("3 strikes. You are fired.", 3.5);
     showToast("You are fired. Restarting...");
@@ -717,7 +746,7 @@
 
     setTimeout(() => {
       window.location.reload();
-    }, 2600);
+    }, 4200);
   }
 
   function updateDayEvents() {
@@ -730,6 +759,13 @@
 
       if (season !== game.dayTracker.season) {
         game.dayTracker.season = season;
+        if (season === "winter") {
+          game.state.summerFanUntil = 0;
+          game.state.popsicleUntil = 0;
+        } else {
+          game.state.winterJacketUntil = 0;
+          game.state.coffeeUntil = 0;
+        }
         const seasonInfo = getSeasonConfig();
         showToast(`${seasonInfo.label} started. Buy ${seasonInfo.longItem.title} or ${seasonInfo.shortItem.title}.`);
       }
@@ -1746,42 +1782,206 @@
     ctx.restore();
   }
 
-  function drawStatusOverlay() {
-    if (!isGamePaused()) {
-      const season = getSeasonConfig();
-      const longRemain = getWeatherItemRemaining(season.longItem.stateKey);
-      const shortRemain = getWeatherItemRemaining(season.shortItem.stateKey);
-      const compact = game.viewWidth < 760;
-      const panelWidth = Math.min(game.viewWidth - 28, compact ? 270 : 360);
-      const panelHeight = compact ? 52 : 60;
-      const panelX = 14;
-      const panelY = (topBar?.offsetHeight || 88) + 14;
+  function drawActiveWeatherIcons() {
+    if (game.sessionEnded) return;
+
+    const activeItems = getActiveWeatherItems();
+    if (!activeItems.length) return;
+
+    const compact = game.viewWidth < 640;
+    const iconSize = compact ? 52 : 60;
+    const gap = 14;
+    const totalWidth = (activeItems.length * iconSize) + ((activeItems.length - 1) * gap);
+    const startX = (game.viewWidth - totalWidth) / 2;
+    const baseY = game.viewHeight - (bottomActions?.offsetHeight || 88) - iconSize - 18;
+
+    ctx.save();
+    for (let i = 0; i < activeItems.length; i += 1) {
+      const item = activeItems[i];
+      const x = startX + i * (iconSize + gap);
+      const pulse = 1 + Math.sin(game.time * 5 + i) * 0.03;
 
       ctx.save();
-      ctx.fillStyle = "rgba(9, 16, 24, 0.78)";
-      fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
-      ctx.strokeStyle = season.accent;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
+      ctx.translate(x + iconSize / 2, baseY + iconSize / 2);
+      ctx.scale(pulse, pulse);
 
-      ctx.fillStyle = season.accent;
-      ctx.font = compact ? "bold 12px Manrope" : "bold 13px Manrope";
-      ctx.fillText(`${season.label} | ${getWeatherSpeedLabel()} speed`, panelX + 12, panelY + 18);
+      ctx.fillStyle = "rgba(8, 14, 24, 0.84)";
+      fillRoundedRect(-iconSize / 2, -iconSize / 2, iconSize, iconSize, 16);
+      ctx.strokeStyle = item.accent;
+      ctx.lineWidth = 3;
+      ctx.strokeRect((-iconSize / 2) + 1.5, (-iconSize / 2) + 1.5, iconSize - 3, iconSize - 3);
+
+      ctx.font = compact ? "26px sans-serif" : "30px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(item.icon, 0, -6);
 
       ctx.fillStyle = "#eff7ff";
-      ctx.font = compact ? "11px Manrope" : "12px Manrope";
-      ctx.fillText(getWeatherNeedText(), panelX + 12, panelY + 34);
-
-      const timerParts = [];
-      if (longRemain > 0) timerParts.push(`${season.longItem.title} ${formatTimer(longRemain)}`);
-      if (shortRemain > 0) timerParts.push(`${season.shortItem.title} ${formatTimer(shortRemain)}`);
-      if (timerParts.length > 0) {
-        ctx.fillStyle = "#c7d9ec";
-        ctx.fillText(timerParts.join(" | "), panelX + 12, panelY + 49);
-      }
+      ctx.font = compact ? "bold 10px Manrope" : "bold 11px Manrope";
+      ctx.fillText(formatTimer(item.remaining), 0, iconSize * 0.22);
       ctx.restore();
     }
+    ctx.restore();
+  }
 
+  function drawFiredTanOverlay() {
+    const t = game.sessionEndTimer;
+    const entrance = clamp(t / 0.95, 0, 1);
+    const stomp = Math.abs(Math.sin(t * 8.5));
+    const shake = Math.min(1, t * 1.8) * Math.sin(t * 30) * 9;
+    const scale = Math.min(7.5, Math.max(4.6, Math.min(game.viewWidth, game.viewHeight) / 80));
+    const targetX = game.viewWidth * 0.36;
+    const x = -220 + (targetX + 220) * entrance;
+    const y = game.viewHeight * 0.68 + stomp * 8;
+    const textPunch = 0.86 + Math.min(0.22, t * 0.11);
+
+    ctx.save();
+    ctx.fillStyle = "rgba(30, 0, 0, 0.58)";
+    ctx.fillRect(0, 0, game.viewWidth, game.viewHeight);
+    ctx.translate(shake, 0);
+
+    const bg = ctx.createLinearGradient(0, 0, 0, game.viewHeight);
+    bg.addColorStop(0, "rgba(80, 0, 0, 0.7)");
+    bg.addColorStop(0.55, "rgba(28, 0, 0, 0.82)");
+    bg.addColorStop(1, "rgba(6, 0, 0, 0.94)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, game.viewWidth, game.viewHeight);
+
+    for (let i = -1; i < 10; i += 1) {
+      const stripeX = i * 120 + ((t * 80) % 120);
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255, 40, 40, 0.08)" : "rgba(255, 210, 70, 0.08)";
+      ctx.beginPath();
+      ctx.moveTo(stripeX, 0);
+      ctx.lineTo(stripeX + 80, 0);
+      ctx.lineTo(stripeX - 30, game.viewHeight);
+      ctx.lineTo(stripeX - 110, game.viewHeight);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath();
+    ctx.ellipse(0, 54, 38, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#1a0a00";
+    fillRoundedRect(-20, 18 + stomp * 2.5, 13, 30, 5);
+    fillRoundedRect(7, 16 - stomp * 1.8, 13, 32, 5);
+    ctx.fillStyle = "#080303";
+    fillRoundedRect(-24, 45 + stomp * 2.5, 20, 8, 4);
+    fillRoundedRect(6, 43 - stomp * 1.8, 20, 8, 4);
+
+    const suitGrad = ctx.createLinearGradient(-26, -18, 26, 40);
+    suitGrad.addColorStop(0, "#ff5148");
+    suitGrad.addColorStop(0.5, "#c41212");
+    suitGrad.addColorStop(1, "#560909");
+    ctx.fillStyle = suitGrad;
+    fillRoundedRect(-24, -18, 48, 52, 10);
+
+    ctx.fillStyle = "#2a0404";
+    fillRoundedRect(-6, -13, 12, 34, 4);
+
+    ctx.fillStyle = "#7d1515";
+    fillRoundedRect(-39, -15 + stomp * 1.5, 15, 31, 5);
+    fillRoundedRect(24, -19 - stomp * 1.5, 15, 35, 5);
+    ctx.fillStyle = "#f0c080";
+    ctx.beginPath();
+    ctx.arc(-31, 18 + stomp * 1.5, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(31, 15 - stomp * 1.5, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f0b870";
+    fillRoundedRect(-7, -29, 14, 11, 4);
+    ctx.beginPath();
+    ctx.arc(0, -46, 22, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#170707";
+    ctx.beginPath();
+    ctx.ellipse(0, -58, 20, 8, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(-8, -46, 5, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(8, -46, 5, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#180404";
+    ctx.beginPath();
+    ctx.arc(-8, -46, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(8, -46, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#180404";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-15, -54);
+    ctx.lineTo(-3, -50);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(15, -54);
+    ctx.lineTo(3, -50);
+    ctx.stroke();
+
+    ctx.fillStyle = "#5f0000";
+    ctx.beginPath();
+    ctx.ellipse(0, -35, 8, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    fillRoundedRect(-24, -11, 48, 14, 4);
+    ctx.fillStyle = "#7d0000";
+    ctx.font = "bold 10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TAN", 0, -4);
+
+    for (let i = 0; i < 3; i += 1) {
+      const puffX = -44 + i * 20;
+      const puffY = 52 + Math.sin(t * 11 + i) * 4;
+      ctx.fillStyle = "rgba(255, 220, 180, 0.2)";
+      ctx.beginPath();
+      ctx.arc(puffX, puffY, 6 + i, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(game.viewWidth * 0.58, game.viewHeight * 0.33);
+    ctx.scale(textPunch, textPunch);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(30, 0, 0, 0.95)";
+    ctx.lineWidth = 12;
+    ctx.fillStyle = "#ff3030";
+    ctx.font = `900 ${Math.min(110, game.viewWidth * 0.17)}px Russo One`;
+    ctx.strokeText("YOU'RE", 0, -34);
+    ctx.fillText("YOU'RE", 0, -34);
+    ctx.font = `900 ${Math.min(132, game.viewWidth * 0.2)}px Russo One`;
+    ctx.strokeText("FIRED", 0, 58);
+    ctx.fillText("FIRED", 0, 58);
+
+    ctx.fillStyle = "rgba(255, 233, 200, 0.94)";
+    ctx.font = `bold ${Math.min(24, game.viewWidth * 0.034)}px Manrope`;
+    ctx.fillText("Tan storms in and shuts the whole hangar down", 0, 114);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function drawStatusOverlay() {
     if (game.incident.active && !isGamePaused()) {
       const compact = game.viewWidth < 720;
       const panelWidth = Math.min(game.viewWidth - 28, compact ? 230 : 360);
@@ -1803,6 +2003,11 @@
       ctx.fillText(text, game.viewWidth / 2, panelY + panelHeight * 0.68);
       ctx.textAlign = "start";
       ctx.restore();
+    }
+
+    if (game.sessionEnded) {
+      drawFiredTanOverlay();
+      return;
     }
 
     if (!isGamePaused()) return;
@@ -1838,6 +2043,7 @@
     drawBoss();
     drawInteractionHint();
     drawCookieDayBanner();
+    drawActiveWeatherIcons();
     drawStatusOverlay();
   }
 
@@ -2578,7 +2784,10 @@
   }
 
   function update(dt) {
+    game.time += dt;
+
     if (game.sessionEnded) {
+      game.sessionEndTimer += dt;
       updateUI();
       return;
     }
@@ -2596,7 +2805,6 @@
     }
 
     game.elapsed += dt;
-    game.time += dt;
 
     const size = getWorldSize();
     game.width = size.width;
