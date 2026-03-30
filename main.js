@@ -123,7 +123,7 @@
 
   function createInitialState() {
     return {
-      money: 260,
+      money: 2500,
       level: 1,
       xp: 0,
       xpToNext: 100,
@@ -202,6 +202,15 @@
       y: 0,
       timer: 0,
       nextEvent: 45,   // seconds until first visit
+      msgIndex: 0,
+      shake: 0
+    },
+    qualityBoss: {
+      phase: "idle",   // "idle" | "entering" | "yelling" | "leaving"
+      x: 0,
+      y: 0,
+      timer: 0,
+      nextEvent: 62,
       msgIndex: 0,
       shake: 0
     },
@@ -380,12 +389,12 @@
     const slots = [];
     const size = getWorldSize();
     const count = getHangarSlots();
-    const cols = Math.min(4 + game.state.hangarLevel, count);
+    const cols = Math.min(4, count);
     const rows = Math.ceil(count / cols);
-    const startX = 280;
+    const startX = 220;
     const startY = 190;
-    const xGap = Math.max(190, (size.width - 460) / Math.max(cols - 1, 1));
-    const yGap = Math.max(190, (size.height - 340) / Math.max(rows - 1, 1));
+    const xGap = (size.width - 440) / Math.max(cols - 1, 1);
+    const yGap = 175;
 
     for (let i = 0; i < count; i += 1) {
       const c = i % cols;
@@ -1557,6 +1566,9 @@
     const p = worldToScreen(game.player.x, game.player.y);
     const bob = Math.sin(game.player.step) * 2.8;
     const armSwing = Math.sin(game.player.step * 1.1) * 7;
+    const season = getCurrentSeason();
+    const isWinter = season === "winter";
+    const isSummer = season === "summer";
 
     ctx.save();
     ctx.translate(p.x, p.y + bob);
@@ -1576,11 +1588,21 @@
     fillRoundedRect(-15, 40, 12, 7, 3);
     fillRoundedRect(3, 40, 12, 7, 3);
 
-    // Body — hi-vis vest
+    // Body — seasonal tint
     const vestGrad = ctx.createLinearGradient(-15, -10, 15, 28);
-    vestGrad.addColorStop(0, "#ffd428");
-    vestGrad.addColorStop(0.4, "#e8a500");
-    vestGrad.addColorStop(1, "#b07600");
+    if (isWinter) {
+      vestGrad.addColorStop(0, "#b8dcff");
+      vestGrad.addColorStop(0.4, "#4e8fc7");
+      vestGrad.addColorStop(1, "#234e7d");
+    } else if (isSummer) {
+      vestGrad.addColorStop(0, "#ff7a6a");
+      vestGrad.addColorStop(0.4, "#df3f39");
+      vestGrad.addColorStop(1, "#922322");
+    } else {
+      vestGrad.addColorStop(0, "#ffd428");
+      vestGrad.addColorStop(0.4, "#e8a500");
+      vestGrad.addColorStop(1, "#b07600");
+    }
     ctx.fillStyle = vestGrad;
     fillRoundedRect(-15, -10, 30, 37, 7);
 
@@ -1599,11 +1621,11 @@
     fillRoundedRect(14, 14 - armSwing, 10, 7, 3);
 
     // Neck
-    ctx.fillStyle = "#f0b880";
+    ctx.fillStyle = isWinter ? "#9fc6f0" : (isSummer ? "#f19184" : "#f0b880");
     fillRoundedRect(-5, -18, 10, 10, 3);
 
     // Head
-    ctx.fillStyle = "#f0b880";
+    ctx.fillStyle = isWinter ? "#9fc6f0" : (isSummer ? "#f19184" : "#f0b880");
     ctx.beginPath();
     ctx.arc(0, -26, 14, 0, Math.PI * 2);
     ctx.fill();
@@ -1637,6 +1659,29 @@
     ctx.beginPath();
     ctx.arc(5, -25, 2, 0, Math.PI * 2);
     ctx.fill();
+
+    if (isSummer) {
+      ctx.fillStyle = "rgba(180, 230, 255, 0.9)";
+      for (let i = 0; i < 3; i += 1) {
+        const sx = -10 + i * 10;
+        const sy = -43 + Math.sin(game.time * 7 + i) * 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    if (isWinter) {
+      ctx.fillStyle = "rgba(8, 20, 35, 0.7)";
+      fillRoundedRect(-34, -62, 68, 18, 8);
+      ctx.fillStyle = "#d7ebff";
+      ctx.font = "bold 11px Manrope";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Brrr...", 0, -53);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
 
     ctx.restore();
   }
@@ -1976,7 +2021,7 @@
     ctx.font = "bold 10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("SCOTTY", 0, -4);
+    ctx.fillText("LEAD", 0, -4);
 
     for (let i = 0; i < 3; i += 1) {
       const puffX = -44 + i * 20;
@@ -2007,7 +2052,7 @@
 
     ctx.fillStyle = "rgba(255, 233, 200, 0.94)";
     ctx.font = `bold ${Math.min(24, game.viewWidth * 0.034)}px Manrope`;
-    ctx.fillText("Scotty storms in and shuts the whole hangar down", 0, 114);
+    ctx.fillText("Lead storms in and shuts the whole hangar down", 0, 114);
     ctx.restore();
 
     ctx.restore();
@@ -2073,6 +2118,7 @@
     drawWorkers();
     drawPlayer();
     drawBoss();
+    drawQualityBoss();
     drawInteractionHint();
     drawCookieDayBanner();
     drawActiveWeatherIcons();
@@ -2526,13 +2572,19 @@
     }
   }
 
-  const SCOTTY_LINES = [
+  const LEAD_LINES = [
     "HURRY UP!! We have planes waiting!!",
     "You can't do that job — that's TOO HARD for you!",
     "WHAT ARE YOU DOING?! Move faster!!",
     "I'm watching you! SPEED IT UP!!",
     "That repair is too hard, get someone else!",
     "COME ON COME ON COME ON!! HURRY UP!!"
+  ];
+
+  const QUALITY_LINES = [
+    "Where is your manual?",
+    "Technically you should do it this way, don't do it that way.",
+    "Man, I wish I had your job, you don't do anything."
   ];
 
   function updateBoss(dt) {
@@ -2545,7 +2597,7 @@
         b.phase = "entering";
         b.y = game.viewHeight * 0.45;
         b.x = -90;
-        b.msgIndex = Math.floor(Math.random() * SCOTTY_LINES.length);
+        b.msgIndex = Math.floor(Math.random() * LEAD_LINES.length);
         b.timer = 0;
       }
       return;
@@ -2558,7 +2610,7 @@
         b.phase = "yelling";
         b.timer = 3.5;
         b.shake = 3.5;
-        showToast(`Scotty: "${SCOTTY_LINES[b.msgIndex]}"`);
+        showToast(`Lead: "${LEAD_LINES[b.msgIndex]}"`);
         playSound("alert");
         vibrate([80, 40, 80]);
       }
@@ -2580,6 +2632,54 @@
         b.phase = "idle";
         // Next visit in 50-100 seconds
         b.nextEvent = 50 + Math.random() * 50;
+      }
+    }
+  }
+
+  function updateQualityBoss(dt) {
+    const b = game.qualityBoss;
+    if (b.shake > 0) b.shake -= dt;
+
+    if (b.phase === "idle") {
+      b.nextEvent -= dt;
+      if (b.nextEvent <= 0) {
+        b.phase = "entering";
+        b.y = game.viewHeight * 0.58;
+        b.x = game.viewWidth + 95;
+        b.msgIndex = Math.floor(Math.random() * QUALITY_LINES.length);
+        b.timer = 0;
+      }
+      return;
+    }
+
+    if (b.phase === "entering") {
+      b.x -= dt * 170;
+      const stopX = Math.max(90, game.viewWidth - 110);
+      if (b.x <= stopX) {
+        b.x = stopX;
+        b.phase = "yelling";
+        b.timer = 3.8;
+        b.shake = 2.8;
+        showToast(`Quality: "${QUALITY_LINES[b.msgIndex]}"`);
+        playSound("alert");
+      }
+      return;
+    }
+
+    if (b.phase === "yelling") {
+      b.timer -= dt;
+      if (b.timer <= 0) {
+        b.phase = "leaving";
+      }
+      return;
+    }
+
+    if (b.phase === "leaving") {
+      b.x += dt * 190;
+      if (b.x > game.viewWidth + 95) {
+        b.x = game.viewWidth + 95;
+        b.phase = "idle";
+        b.nextEvent = 70 + Math.random() * 55;
       }
     }
   }
@@ -2708,11 +2808,11 @@
     ctx.font = "bold 9px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("SCOTTY", 0, 0);
+    ctx.fillText("LEAD", 0, 0);
 
     // Speech bubble (during yelling phase)
     if (b.phase === "yelling") {
-      const msg = SCOTTY_LINES[b.msgIndex];
+      const msg = LEAD_LINES[b.msgIndex];
       const maxW = 200;
       ctx.font = "bold 12px sans-serif";
       ctx.textAlign = "left";
@@ -2762,6 +2862,161 @@
       ctx.stroke();
 
       ctx.fillStyle = "#6b0000";
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], bX + 8, bY + 8 + i * lineH);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawQualityBoss() {
+    const b = game.qualityBoss;
+    if (b.phase === "idle") return;
+
+    const shakeX = b.shake > 0 ? (Math.random() - 0.5) * 2.4 : 0;
+    const bob = b.phase === "yelling" ? Math.sin(game.time * 10) * 2 : 0;
+
+    ctx.save();
+    ctx.translate(b.x + shakeX, b.y + bob);
+
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.beginPath();
+    ctx.ellipse(0, 42, 22, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#0d1324";
+    fillRoundedRect(-13, 26, 10, 20, 4);
+    fillRoundedRect(3, 26, 10, 20, 4);
+    ctx.fillStyle = "#070b16";
+    fillRoundedRect(-15, 42, 13, 6, 3);
+    fillRoundedRect(3, 42, 13, 6, 3);
+
+    const suitGrad = ctx.createLinearGradient(-15, -12, 15, 28);
+    suitGrad.addColorStop(0, "#5f7ea5");
+    suitGrad.addColorStop(0.5, "#39557c");
+    suitGrad.addColorStop(1, "#22314f");
+    ctx.fillStyle = suitGrad;
+    fillRoundedRect(-15, -12, 30, 39, 7);
+
+    ctx.fillStyle = "#1b2842";
+    fillRoundedRect(-4, -8, 8, 26, 3);
+
+    ctx.fillStyle = "#334b70";
+    fillRoundedRect(-26, -10, 12, 22, 4);
+    fillRoundedRect(14, -10, 12, 22, 4);
+
+    ctx.fillStyle = "#f0b870";
+    ctx.beginPath();
+    ctx.arc(-20, 14, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(20, 14, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f0b870";
+    fillRoundedRect(-5, -20, 10, 10, 3);
+    ctx.beginPath();
+    ctx.arc(0, -30, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#1a2233";
+    ctx.beginPath();
+    ctx.ellipse(0, -40, 14, 6, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(-5, -30, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(5, -30, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0f1728";
+    ctx.beginPath();
+    ctx.arc(-5, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(5, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#0f1728";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-9, -34);
+    ctx.lineTo(-2, -32);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(9, -34);
+    ctx.lineTo(2, -32);
+    ctx.stroke();
+
+    ctx.fillStyle = "#0f1728";
+    fillRoundedRect(-7, -20, 14, 11, 3);
+
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    fillRoundedRect(-22, -5, 44, 13, 4);
+    ctx.fillStyle = "#22314f";
+    ctx.font = "bold 8px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("QUALITY", 0, 1);
+
+    ctx.fillStyle = "#d7dfef";
+    fillRoundedRect(18, 1, 16, 12, 2);
+    ctx.strokeStyle = "#7a8da8";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(18, 1, 16, 12);
+
+    if (b.phase === "yelling") {
+      const msg = QUALITY_LINES[b.msgIndex];
+      const maxW = 220;
+      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+
+      const words = msg.split(" ");
+      const lines = [];
+      let cur = "";
+      for (const w of words) {
+        const test = cur ? cur + " " + w : w;
+        if (ctx.measureText(test).width > maxW - 16) {
+          if (cur) lines.push(cur);
+          cur = w;
+        } else {
+          cur = test;
+        }
+      }
+      if (cur) lines.push(cur);
+
+      const lineH = 16;
+      const bW = maxW;
+      const bH = lines.length * lineH + 16;
+      const bX = -bW - 24;
+      const bY = -62 - bH;
+
+      ctx.fillStyle = "rgba(236, 244, 255, 0.97)";
+      ctx.strokeStyle = "#39557c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const br = 8;
+      ctx.moveTo(bX + br, bY);
+      ctx.lineTo(bX + bW - br, bY);
+      ctx.arcTo(bX + bW, bY, bX + bW, bY + br, br);
+      ctx.lineTo(bX + bW, bY + bH - br);
+      ctx.arcTo(bX + bW, bY + bH, bX + bW - br, bY + bH, br);
+      ctx.lineTo(bX + bW - 26, bY + bH);
+      ctx.lineTo(bX + bW - 10, bY + bH + 12);
+      ctx.lineTo(bX + bW - 38, bY + bH);
+      ctx.lineTo(bX + br, bY + bH);
+      ctx.arcTo(bX, bY + bH, bX, bY + bH - br, br);
+      ctx.lineTo(bX, bY + br);
+      ctx.arcTo(bX, bY, bX + br, bY, br);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#22314f";
       for (let i = 0; i < lines.length; i++) {
         ctx.fillText(lines[i], bX + 8, bY + 8 + i * lineH);
       }
@@ -2854,6 +3109,7 @@
     updateIdleIncome(dt);
     updateCombo(dt);
     updateBoss(dt);
+    updateQualityBoss(dt);
     updateCookieDay(dt);
     updateDayEvents();
     updateCamera();
