@@ -227,7 +227,7 @@
       markerSpeed: 1,
       zoneCenter: 0.5,
       zoneWidth: 0.22,
-      nextEvent: 20
+      nextEvent: 120
     },
     dayTracker: {
       currentDay: 1,
@@ -455,7 +455,8 @@
       doneTimer: 0,
       spawnedAt: game.elapsed,
       reservedBy: null,
-      flash: 0
+      flash: 0,
+      angryTimer: 0
     });
   }
 
@@ -647,15 +648,16 @@
     game.incident.active = true;
     game.incident.type = type;
     game.incident.progress = 0;
-    game.incident.need = type === "oil" ? 4 : 5;
+    game.incident.need = type === "oil" ? 2 : 3;
     game.incident.marker = 0.5;
     game.incident.markerDir = Math.random() < 0.5 ? -1 : 1;
-    game.incident.markerSpeed = type === "oil" ? 0.95 : 1.1;
+    game.incident.markerSpeed = type === "oil" ? 0.72 : 0.86;
     game.incident.zoneCenter = rand(0.28, 0.72);
-    game.incident.zoneWidth = type === "oil" ? 0.24 : 0.2;
+    game.incident.zoneWidth = type === "oil" ? 0.32 : 0.28;
     game.incident.x = rand(170, game.width - 170);
     game.incident.y = rand(170, game.height - 170);
-    game.incident.nextEvent = 26 + Math.random() * 26;
+    game.incident.nextEvent = 135 + Math.random() * 135;
+    makePlanesAngry(type === "oil" ? 2.8 : 3.2, 0.7);
     showToast(type === "oil" ? "Oil spill! Hit the green timing zone." : "Tool missing! Hit the green timing zone.");
     playSound("alert");
   }
@@ -691,6 +693,7 @@
       }
     } else {
       incident.progress = Math.max(0, incident.progress - 1);
+      makePlanesAngry(4.2, incident.type === "oil" ? 1.5 : 1.9);
       showToast("Missed timing");
       playSound("alert");
       vibrate(8);
@@ -717,6 +720,15 @@
     } else if (incident.marker >= 1) {
       incident.marker = 1;
       incident.markerDir = -1;
+    }
+  }
+
+  function makePlanesAngry(angrySeconds = 4, waitPenalty = 0.8) {
+    for (const a of game.aircraft) {
+      if (!["waiting", "diagnosing", "repairing", "done"].includes(a.state)) continue;
+      a.angryTimer = Math.max(a.angryTimer || 0, angrySeconds);
+      a.wait = Math.max(2, a.wait - waitPenalty);
+      a.flash = Math.max(a.flash || 0, 0.5);
     }
   }
 
@@ -1032,6 +1044,7 @@
     for (let i = game.aircraft.length - 1; i >= 0; i -= 1) {
       const a = game.aircraft[i];
       if (a.flash > 0) a.flash -= dt;
+      if (a.angryTimer > 0) a.angryTimer -= dt;
 
       if (a.state === "arriving") {
         const dx = a.targetX - a.x;
@@ -1504,6 +1517,16 @@
     const barW = 120;
     const barX = p.x - barW / 2;
     const barY = p.y - size - 36;
+
+    if (a.angryTimer > 0) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      fillRoundedRect(p.x - 26, p.y - size - 64, 52, 20, 10);
+      ctx.fillStyle = "#ff6b5f";
+      ctx.font = "bold 14px Manrope";
+      ctx.textAlign = "center";
+      ctx.fillText("ANGRY", p.x, p.y - size - 50);
+      ctx.textAlign = "start";
+    }
 
     ctx.fillStyle = "rgba(0,0,0,0.52)";
     fillRoundedRect(barX - 1, barY - 1, barW + 2, 14, 7);
