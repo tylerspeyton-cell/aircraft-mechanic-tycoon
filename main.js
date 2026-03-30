@@ -748,6 +748,13 @@
       worker.targetId = null;
     }
 
+    // Backward compatibility: clear legacy worker reservation marker.
+    for (const aircraft of game.aircraft) {
+      if (aircraft.reservedBy === "worker") {
+        aircraft.reservedBy = null;
+      }
+    }
+
     const needed = game.state.workerLevel;
 
     while (game.workers.length < needed) {
@@ -811,7 +818,7 @@
         worker.y += (dy / d) * speed * dt;
       } else {
         if (target.state === "waiting") {
-          startDiagnose(target, "worker");
+          startDiagnose(target, worker.id);
         } else if (target.state === "diagnosing") {
           target.diagnoseTimer -= dt * 0.8 * getDiagnoseSpeed();
         } else if (target.state === "repairing") {
@@ -2421,7 +2428,11 @@
 
       game.input.keys[key] = true;
       if (key === " " || key === "e") {
+        ev.preventDefault();
         game.input.actionHeld = true;
+        if (!ev.repeat) {
+          tryInteract();
+        }
       }
       if (key === "f") {
         toggleFullscreen();
@@ -2443,6 +2454,7 @@
       }
       game.input.keys[key] = false;
       if (key === " " || key === "e") {
+        ev.preventDefault();
         game.input.actionHeld = false;
       }
     });
