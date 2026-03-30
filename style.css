@@ -47,7 +47,7 @@ body {
   right: 0;
   z-index: 12;
   display: grid;
-  grid-template-columns: 1fr 1.8fr 1fr;
+  grid-template-columns: 1fr 1.6fr 1fr 1fr;
   gap: 10px;
   padding: 10px 12px;
 }
@@ -72,6 +72,17 @@ body {
 .value {
   font-family: "Russo One", sans-serif;
   font-size: 1rem;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strike-label {
+  margin-top: 4px;
+  color: #ffd0c8;
 }
 
 .level-row {
@@ -118,8 +129,9 @@ body {
   z-index: 12;
   display: flex;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 10px;
+  flex-wrap: wrap;
 }
 
 .pill-btn,
@@ -462,7 +474,7 @@ body {
 
 @media (max-width: 820px) {
   .top-bar {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
     padding: 8px;
   }

@@ -15,6 +15,11 @@
   const upgradeBtn = document.getElementById("upgradeBtn");
   const settingsBtn = document.getElementById("settingsBtn");
   const fullscreenBtn = document.getElementById("fullscreenBtn");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const saveBtn = document.getElementById("saveBtn");
+
+  const dayValue = document.getElementById("dayValue");
+  const strikesValue = document.getElementById("strikesValue");
 
   const upgradeModal = document.getElementById("upgradeModal");
   const settingsModal = document.getElementById("settingsModal");
@@ -66,27 +71,8 @@
 
   const REPAIR_TYPES = ["Engine", "Tires", "Electrical"];
 
-  const game = {
-    width: WORLD_BASE.width,
-    height: WORLD_BASE.height,
-    viewWidth: 0,
-    viewHeight: 0,
-    cameraX: 0,
-    cameraY: 0,
-    time: 0,
-    elapsed: 0,
-    spawnTimer: 0,
-    spawnBase: 8,
-    saveTimer: 0,
-    idleTimer: 0,
-    workers: [],
-    aircraft: [],
-    particles: [],
-    settings: {
-      sound: true,
-      vibration: true
-    },
-    state: {
+  function createInitialState() {
+    return {
       money: 260,
       level: 1,
       xp: 0,
@@ -109,7 +95,36 @@
       fuelLevel: 1,
       eliteLevel: 1,
       lastDailyClaim: "",
-      totalRepairs: 0
+      totalRepairs: 0,
+      strikes: 0,
+      lostPlanes: 0,
+      lastBreakDay: 0,
+      lastMeetingDay: 0
+    };
+  }
+
+  const game = {
+    width: WORLD_BASE.width,
+    height: WORLD_BASE.height,
+    viewWidth: 0,
+    viewHeight: 0,
+    cameraX: 0,
+    cameraY: 0,
+    time: 0,
+    elapsed: 0,
+    spawnTimer: 0,
+    spawnBase: 8,
+    saveTimer: 0,
+    idleTimer: 0,
+    workers: [],
+    aircraft: [],
+    particles: [],
+    settings: {
+      sound: true,
+      vibration: true
+    },
+    state: {
+      ...createInitialState()
     },
     input: {
       keys: {},
@@ -133,6 +148,25 @@
       lastDay: 0,
       banner: 0         // display timer in seconds
     },
+    pause: {
+      manual: false,
+      forced: false,
+      reason: "",
+      timer: 0
+    },
+    incident: {
+      active: false,
+      type: "",
+      x: 0,
+      y: 0,
+      progress: 0,
+      need: 0,
+      nextEvent: 20
+    },
+    dayTracker: {
+      currentDay: 1
+    },
+    sessionEnded: false,
     player: {
       x: 320,
       y: 380,
@@ -411,6 +445,129 @@
     return 1 + (game.state.eliteLevel - 1) * 0.35;
   }
 
+  function getCurrentDay() {
+    return Math.floor(game.elapsed / DAY_LENGTH) + 1;
+  }
+
+  function isGamePaused() {
+    return game.pause.manual || game.pause.forced || game.sessionEnded;
+  }
+
+  function startForcedPause(reason, seconds) {
+    game.pause.forced = true;
+    game.pause.reason = reason;
+    game.pause.timer = Math.max(0, seconds);
+  }
+
+  function clearForcedPause() {
+    game.pause.forced = false;
+    game.pause.reason = "";
+    game.pause.timer = 0;
+  }
+
+  function togglePause() {
+    if (game.sessionEnded) return;
+    game.pause.manual = !game.pause.manual;
+    if (game.pause.manual) {
+      showToast("Paused");
+    } else {
+      showToast("Resumed");
+    }
+    updateUI();
+  }
+
+  function saveProgressWithFeedback() {
+    saveGame();
+    showToast("Progress saved");
+  }
+
+  function triggerIncident() {
+    if (game.incident.active || isGamePaused()) return;
+    const type = Math.random() < 0.5 ? "oil" : "tool";
+    game.incident.active = true;
+    game.incident.type = type;
+    game.incident.progress = 0;
+    game.incident.need = type === "oil" ? 3.2 : 3.8;
+    game.incident.x = rand(170, game.width - 170);
+    game.incident.y = rand(170, game.height - 170);
+    game.incident.nextEvent = 26 + Math.random() * 26;
+    showToast(type === "oil" ? "Oil spill! Clean it up!" : "Tool missing! Find it!");
+    playSound("alert");
+  }
+
+  function updateIncident(dt) {
+    const incident = game.incident;
+
+    if (!incident.active) {
+      incident.nextEvent -= dt;
+      if (incident.nextEvent <= 0) {
+        triggerIncident();
+      }
+      return;
+    }
+
+    const close = dist(game.player, incident) <= INTERACT_RANGE;
+    if (close && game.input.actionHeld) {
+      incident.progress += dt * 1.35;
+      if (incident.progress >= incident.need) {
+        const msg = incident.type === "oil" ? "Oil spill cleaned" : "Lost tool found";
+        incident.active = false;
+        incident.type = "";
+        incident.progress = 0;
+        incident.need = 0;
+        showToast(`${msg}. Back to work!`);
+        playSound("repair");
+      }
+    }
+  }
+
+  function registerPlaneLoss(typeName) {
+    game.state.lostPlanes += 1;
+    game.state.strikes += 1;
+    showToast(`${typeName} lost. Strike ${game.state.strikes}/3`);
+    playSound("alert");
+
+    if (game.state.strikes >= 3) {
+      fireAndRestart();
+    }
+  }
+
+  function fireAndRestart() {
+    if (game.sessionEnded) return;
+    game.sessionEnded = true;
+    game.pause.manual = false;
+    startForcedPause("3 strikes. You are fired.", 3.5);
+    showToast("You are fired. Restarting...");
+    saveGame();
+
+    setTimeout(() => {
+      localStorage.removeItem(STORAGE_KEY);
+      window.location.reload();
+    }, 2600);
+  }
+
+  function updateDayEvents() {
+    const dayNum = getCurrentDay();
+
+    if (dayNum !== game.dayTracker.currentDay) {
+      game.dayTracker.currentDay = dayNum;
+      showToast(`Day ${dayNum} started`);
+    }
+
+    if (game.state.lastBreakDay !== dayNum) {
+      game.state.lastBreakDay = dayNum;
+      startForcedPause("Mandatory daily break", 6);
+    }
+
+    if (dayNum % 10 === 0 && game.state.lastMeetingDay !== dayNum) {
+      game.state.lastMeetingDay = dayNum;
+      const meetingCost = 260 + dayNum * 35;
+      game.state.money = Math.max(0, game.state.money - meetingCost);
+      startForcedPause(`All-hands meeting. Food cost ${fmtMoney(meetingCost)}`, 5);
+      playSound("cash");
+    }
+  }
+
   function startDiagnose(aircraft, actor = "player") {
     if (aircraft.state !== "waiting") return;
     aircraft.state = "diagnosing";
@@ -465,6 +622,7 @@
     game.state.combo = 1;
     showToast(`${aircraft.typeName} left unhappy`);
     playSound("alert");
+    registerPlaneLoss(aircraft.typeName);
   }
 
   function nearestInteractable() {
@@ -482,6 +640,16 @@
   }
 
   function tryInteract() {
+    if (isGamePaused()) return;
+
+    if (game.incident.active) {
+      const close = dist(game.player, game.incident) <= INTERACT_RANGE;
+      if (!close) {
+        game.input.tapTarget = { x: game.incident.x, y: game.incident.y };
+      }
+      return;
+    }
+
     const nearest = nearestInteractable();
     if (!nearest.target || nearest.distance > INTERACT_RANGE) return;
     const a = nearest.target;
@@ -494,6 +662,12 @@
   }
 
   function tapAircraftInteraction(point) {
+    if (isGamePaused()) return false;
+    if (game.incident.active) {
+      game.input.tapTarget = { x: game.incident.x, y: game.incident.y };
+      return true;
+    }
+
     let hit = null;
     for (const a of game.aircraft) {
       if (!["waiting", "diagnosing", "repairing", "done"].includes(a.state)) continue;
@@ -1289,15 +1463,89 @@
     ctx.restore();
   }
 
+  function drawIncident() {
+    if (!game.incident.active) return;
+    const i = game.incident;
+    const p = worldToScreen(i.x, i.y);
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    if (i.type === "oil") {
+      const g = ctx.createRadialGradient(0, 0, 8, 0, 0, 58);
+      g.addColorStop(0, "rgba(35, 35, 35, 0.85)");
+      g.addColorStop(0.6, "rgba(12, 12, 12, 0.72)");
+      g.addColorStop(1, "rgba(0, 0, 0, 0.2)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 66, 36, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#ffd24a";
+      fillRoundedRect(-24, -16, 48, 32, 8);
+      ctx.fillStyle = "#203148";
+      fillRoundedRect(-6, -8, 12, 16, 3);
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      fillRoundedRect(-24, -16, 48, 10, 8);
+    }
+
+    const ratio = i.need > 0 ? clamp(i.progress / i.need, 0, 1) : 0;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    fillRoundedRect(-50, -60, 100, 10, 5);
+    ctx.fillStyle = "#56d8c5";
+    fillRoundedRect(-50, -60, 100 * ratio, 10, 5);
+
+    ctx.restore();
+  }
+
+  function drawStatusOverlay() {
+    if (game.incident.active && !isGamePaused()) {
+      ctx.save();
+      ctx.fillStyle = "rgba(9, 16, 24, 0.72)";
+      fillRoundedRect(14, 94, game.viewWidth - 28, 34, 10);
+      ctx.fillStyle = "#eff7ff";
+      ctx.font = "bold 13px Manrope";
+      const text = game.incident.type === "oil"
+        ? "Oil spill! Move there and hold Repair to clean up."
+        : "Tool lost! Move there and hold Repair to find it.";
+      ctx.fillText(text, 24, 116);
+      ctx.restore();
+    }
+
+    if (!isGamePaused()) return;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(3, 8, 14, 0.54)";
+    ctx.fillRect(0, 0, game.viewWidth, game.viewHeight);
+
+    ctx.fillStyle = "#e7f4ff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 34px Russo One";
+    ctx.fillText(game.sessionEnded ? "FIRED" : "PAUSED", game.viewWidth / 2, game.viewHeight * 0.42);
+
+    ctx.font = "bold 14px Manrope";
+    let detail = game.pause.reason;
+    if (!detail && game.pause.manual) detail = "Press Pause or P to resume";
+    if (game.pause.forced && game.pause.timer > 0) {
+      detail = `${detail} (${Math.ceil(game.pause.timer)}s)`;
+    }
+    if (detail) {
+      ctx.fillText(detail, game.viewWidth / 2, game.viewHeight * 0.47);
+    }
+    ctx.restore();
+  }
+
   function drawScene() {
     drawBackground();
     drawHUDMarkers();
     for (const a of game.aircraft) drawAircraft(a);
+    drawIncident();
     drawWorkers();
     drawPlayer();
     drawBoss();
     drawInteractionHint();
     drawCookieDayBanner();
+    drawStatusOverlay();
   }
 
   function resize() {
@@ -1315,6 +1563,26 @@
     xpText.textContent = `${Math.floor(game.state.xp)} / ${game.state.xpToNext} XP`;
     xpFill.style.width = `${(game.state.xp / game.state.xpToNext) * 100}%`;
     comboValue.textContent = `x${getComboMultiplier().toFixed(1)}`;
+    dayValue.textContent = `Day ${getCurrentDay()}`;
+    strikesValue.textContent = `${game.state.strikes}/3`;
+
+    pauseBtn.textContent = game.pause.manual ? "Resume" : "Pause";
+
+    if (isGamePaused()) {
+      interactBtn.textContent = "Paused";
+      interactBtn.classList.remove("ready-diagnose", "ready-repair", "ready-collect");
+      return;
+    }
+
+    if (game.incident.active) {
+      const nearIncident = dist(game.player, game.incident) <= INTERACT_RANGE;
+      interactBtn.classList.remove("ready-diagnose", "ready-repair", "ready-collect");
+      interactBtn.classList.add("ready-repair");
+      interactBtn.textContent = nearIncident
+        ? (game.incident.type === "oil" ? "Hold to Clean" : "Hold to Find Tool")
+        : (game.incident.type === "oil" ? "Go Clean Spill" : "Go Find Tool");
+      return;
+    }
 
     const nearest = nearestInteractable();
     const inRange = nearest.target && nearest.distance <= INTERACT_RANGE + 30;
@@ -1972,6 +2240,23 @@
   }
 
   function update(dt) {
+    if (game.sessionEnded) {
+      updateUI();
+      return;
+    }
+
+    if (game.pause.forced) {
+      game.pause.timer -= dt;
+      if (game.pause.timer <= 0) {
+        clearForcedPause();
+      }
+    }
+
+    if (isGamePaused()) {
+      updateUI();
+      return;
+    }
+
     game.elapsed += dt;
     game.time += dt;
 
@@ -1980,13 +2265,19 @@
     game.height = size.height;
 
     updatePlayer(dt);
-    updateWorkers(dt);
-    updateAircraft(dt);
-    updateSpawn(dt);
+    updateIncident(dt);
+
+    if (!game.incident.active) {
+      updateWorkers(dt);
+      updateAircraft(dt);
+      updateSpawn(dt);
+    }
+
     updateIdleIncome(dt);
     updateCombo(dt);
     updateBoss(dt);
     updateCookieDay(dt);
+    updateDayEvents();
     updateCamera();
 
     game.saveTimer += dt;
@@ -2009,6 +2300,7 @@
   }
 
   function handlePointerDown(ev) {
+    if (isGamePaused()) return;
     ensureAudio();
     game.input.pointerDown = true;
 
@@ -2024,6 +2316,13 @@
   function setupControls() {
     window.addEventListener("keydown", (ev) => {
       const key = ev.key.toLowerCase();
+      if (key === "p") {
+        togglePause();
+        return;
+      }
+
+      if (isGamePaused()) return;
+
       game.input.keys[key] = true;
       if (key === " " || key === "e") {
         game.input.actionHeld = true;
@@ -2042,6 +2341,10 @@
 
     window.addEventListener("keyup", (ev) => {
       const key = ev.key.toLowerCase();
+      if (isGamePaused()) {
+        if (key === " " || key === "e") game.input.actionHeld = false;
+        return;
+      }
       game.input.keys[key] = false;
       if (key === " " || key === "e") {
         game.input.actionHeld = false;
@@ -2060,6 +2363,7 @@
     });
 
     interactBtn.addEventListener("pointerdown", () => {
+      if (isGamePaused()) return;
       ensureAudio();
       game.input.actionHeld = true;
       tryInteract();
@@ -2090,6 +2394,7 @@
     }
 
     joystickArea.addEventListener("pointerdown", (ev) => {
+      if (isGamePaused()) return;
       ensureAudio();
       joy.activeId = ev.pointerId;
       game.input.joystickActive = true;
@@ -2123,6 +2428,9 @@
     joystickArea.addEventListener("pointercancel", joyEnd);
 
     upgradeBtn.addEventListener("click", openUpgradeModal);
+
+    pauseBtn.addEventListener("click", togglePause);
+    saveBtn.addEventListener("click", saveProgressWithFeedback);
 
     settingsBtn.addEventListener("click", () => {
       settingsModal.showModal();
@@ -2180,6 +2488,7 @@
 
   function init() {
     loadGame();
+    game.dayTracker.currentDay = getCurrentDay();
     setupControls();
     resize();
     applyLoadedSettings();
