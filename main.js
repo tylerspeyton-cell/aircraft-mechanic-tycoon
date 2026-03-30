@@ -105,6 +105,15 @@
     };
   }
 
+  function createFiredResetState() {
+    return {
+      ...createInitialState(),
+      money: 0,
+      tutorialDone: game.state.tutorialDone,
+      lastDailyClaim: game.state.lastDailyClaim
+    };
+  }
+
   const game = {
     width: WORLD_BASE.width,
     height: WORLD_BASE.height,
@@ -582,10 +591,13 @@
     game.pause.manual = false;
     startForcedPause("3 strikes. You are fired.", 3.5);
     showToast("You are fired. Restarting...");
-    saveGame();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      state: createFiredResetState(),
+      elapsed: 0,
+      settings: game.settings
+    }));
 
     setTimeout(() => {
-      localStorage.removeItem(STORAGE_KEY);
       window.location.reload();
     }, 2600);
   }
@@ -706,6 +718,17 @@
     } else if (a.state === "done") {
       collectPayment(a, false);
     }
+  }
+
+  function startActionPress() {
+    if (isGamePaused()) return;
+    ensureAudio();
+    game.input.actionHeld = true;
+    tryInteract();
+  }
+
+  function endActionPress() {
+    game.input.actionHeld = false;
   }
 
   function tapAircraftInteraction(point) {
@@ -1497,6 +1520,8 @@
   }
 
   function drawInteractionHint() {
+    if (game.incident.active) return;
+
     const nearest = nearestInteractable();
     if (!nearest.target || nearest.distance > INTERACT_RANGE + 30) return;
 
@@ -1582,28 +1607,41 @@
     ctx.stroke();
 
     ctx.fillStyle = "#dff6ff";
-    ctx.font = "bold 11px Manrope";
-    ctx.fillText("Tap in green", barX - 2, barY - 10);
+    ctx.font = "bold 10px Manrope";
+    ctx.textAlign = "center";
+    ctx.fillText("Tap in green", 0, barY + 30);
 
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     fillRoundedRect(-50, -44, 100, 8, 4);
     ctx.fillStyle = "#56d8c5";
     fillRoundedRect(-50, -44, 100 * ratio, 8, 4);
 
+    ctx.textAlign = "start";
+
     ctx.restore();
   }
 
   function drawStatusOverlay() {
     if (game.incident.active && !isGamePaused()) {
+      const compact = game.viewWidth < 720;
+      const panelWidth = Math.min(game.viewWidth - 28, compact ? 230 : 360);
+      const panelHeight = compact ? 30 : 34;
+      const panelX = (game.viewWidth - panelWidth) / 2;
+      const panelY = compact ? game.viewHeight - panelHeight - 22 : 94;
+
       ctx.save();
       ctx.fillStyle = "rgba(9, 16, 24, 0.72)";
-      fillRoundedRect(14, 94, game.viewWidth - 28, 34, 10);
+      fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 10);
       ctx.fillStyle = "#eff7ff";
-      ctx.font = "bold 13px Manrope";
-      const text = game.incident.type === "oil"
-        ? "Oil spill! Move close and tap when marker is in green."
-        : "Tool lost! Move close and tap when marker is in green.";
-      ctx.fillText(text, 24, 116);
+      ctx.font = compact ? "bold 12px Manrope" : "bold 13px Manrope";
+      ctx.textAlign = "center";
+      const text = compact
+        ? "Move close. Tap in green."
+        : (game.incident.type === "oil"
+          ? "Oil spill! Move close and tap when marker is in green."
+          : "Tool lost! Move close and tap when marker is in green.");
+      ctx.fillText(text, game.viewWidth / 2, panelY + panelHeight * 0.68);
+      ctx.textAlign = "start";
       ctx.restore();
     }
 
@@ -2429,9 +2467,8 @@
       game.input.keys[key] = true;
       if (key === " " || key === "e") {
         ev.preventDefault();
-        game.input.actionHeld = true;
         if (!ev.repeat) {
-          tryInteract();
+          startActionPress();
         }
       }
       if (key === "f") {
@@ -2455,23 +2492,24 @@
       game.input.keys[key] = false;
       if (key === " " || key === "e") {
         ev.preventDefault();
-        game.input.actionHeld = false;
+        endActionPress();
       }
     });
 
     canvas.addEventListener("pointerdown", handlePointerDown);
 
-    interactBtn.addEventListener("pointerdown", () => {
-      if (isGamePaused()) return;
-      ensureAudio();
-      game.input.actionHeld = true;
-      tryInteract();
+    interactBtn.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      startActionPress();
     });
     interactBtn.addEventListener("pointerup", () => {
-      game.input.actionHeld = false;
+      endActionPress();
     });
     interactBtn.addEventListener("pointercancel", () => {
-      game.input.actionHeld = false;
+      endActionPress();
+    });
+    interactBtn.addEventListener("pointerleave", () => {
+      endActionPress();
     });
     const joy = {
       activeId: null,

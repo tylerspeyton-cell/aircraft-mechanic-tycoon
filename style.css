@@ -170,7 +170,7 @@ body {
 .action-btn {
   position: absolute;
   right: 16px;
-  bottom: 106px;
+  bottom: calc(var(--hud-bottom, 88px) - 2px);
   z-index: 13;
   min-width: 142px;
   transition: transform 80ms ease, box-shadow 80ms ease, background 200ms ease, border-color 200ms ease;
@@ -412,7 +412,7 @@ body {
 .joystick-area {
   position: absolute;
   left: 12px;
-  bottom: 108px;
+  bottom: calc(var(--hud-bottom, 88px));
   width: 150px;
   height: 150px;
   z-index: 12;
@@ -443,8 +443,8 @@ body {
 .toast {
   position: absolute;
   left: 50%;
-  top: 46%;
-  transform: translate(-50%, -50%);
+  top: calc(var(--hud-top, 88px) - 2px);
+  transform: translateX(-50%);
   z-index: 20;
   padding: 10px 14px;
   border-radius: 999px;
@@ -469,11 +469,11 @@ body {
 @keyframes popIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -42%) scale(0.85);
+    transform: translateX(-50%) translateY(-8px) scale(0.85);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translateX(-50%) translateY(0) scale(1);
   }
 }
 
@@ -495,8 +495,39 @@ body {
 
   .action-btn {
     right: 12px;
-    bottom: 90px;
+    bottom: calc(var(--hud-bottom, 96px) + 6px);
     min-width: 132px;
+    padding: 10px 14px;
+    font-size: 0.86rem;
+  }
+
+  .bottom-actions {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .pill-btn {
+    padding: 10px 12px;
+    font-size: 0.84rem;
+  }
+
+  .joystick-area {
+    left: 10px;
+    bottom: calc(var(--hud-bottom, 96px) + 6px);
+    width: 132px;
+    height: 132px;
+  }
+
+  .joystick-thumb {
+    width: 52px;
+    height: 52px;
+    left: 40px;
+    top: 40px;
+  }
+
+  .toast {
+    max-width: min(92vw, 320px);
+    text-align: center;
   }
 }
 
