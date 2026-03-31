@@ -129,3 +129,9 @@ https://<your-username>.github.io/aircraft-mechanic-tycoon/
 - Game progress is stored in localStorage on the current device/browser.
 - Global board sync requires setting `window.MOTY_CONFIG` in `config.js`.
 - No external game framework is required.
+
+## Portal Publishing Kit
+
+- Submission copy and checklist: `PORTAL_SUBMISSION_KIT.md`
+- Privacy Policy page: `privacy.html`
+- Terms of Use page: `terms.html`
