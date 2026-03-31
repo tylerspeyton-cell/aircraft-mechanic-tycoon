@@ -1,5 +1,9 @@
 (() => {
   const STORAGE_KEY = "aircraft_mechanic_tycoon_save_v1";
+  const CLOUD_PROFILE_KEY = "aircraft_mechanic_tycoon_profile_v1";
+  const CLOUD_SYNC_INTERVAL_SECONDS = 35;
+  const LEADERBOARD_LIMIT = 10;
+  const cloudConfig = window.MOTY_CONFIG || null;
 
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
@@ -15,6 +19,7 @@
 
   const interactBtn = document.getElementById("interactBtn");
   const upgradeBtn = document.getElementById("upgradeBtn");
+  const boardBtn = document.getElementById("boardBtn");
   const settingsBtn = document.getElementById("settingsBtn");
   const fullscreenBtn = document.getElementById("fullscreenBtn");
   const pauseBtn = document.getElementById("pauseBtn");
@@ -27,11 +32,18 @@
   const settingsModal = document.getElementById("settingsModal");
   const dailyModal = document.getElementById("dailyModal");
   const tutorialModal = document.getElementById("tutorialModal");
+  const boardModal = document.getElementById("boardModal");
 
   const soundToggle = document.getElementById("soundToggle");
   const vibrationToggle = document.getElementById("vibrationToggle");
   const claimDailyBtn = document.getElementById("claimDailyBtn");
   const dailyText = document.getElementById("dailyText");
+  const characterNameInput = document.getElementById("characterNameInput");
+  const saveCharacterBtn = document.getElementById("saveCharacterBtn");
+  const submitBoardBtn = document.getElementById("submitBoardBtn");
+  const refreshBoardBtn = document.getElementById("refreshBoardBtn");
+  const boardStatusText = document.getElementById("boardStatusText");
+  const boardList = document.getElementById("boardList");
 
   const joystickArea = document.getElementById("joystickArea");
   const joystickBase = document.getElementById("joystickBase");
@@ -154,6 +166,8 @@
       summerFanUntil: 0,
       popsicleUntil: 0,
       lastDailyClaim: "",
+      characterName: "Mechanic",
+      bestCompetitionScore: 0,
       totalRepairs: 0,
       strikes: 0,
       lostPlanes: 0,
@@ -190,6 +204,11 @@
     settings: {
       sound: true,
       vibration: true
+    },
+    leaderboard: {
+      syncing: false,
+      lastSyncElapsed: 0,
+      rows: []
     },
     state: {
       ...createInitialState()
@@ -261,6 +280,197 @@
 
   let audioCtx = null;
   let toastTimeout = null;
+  let cloudProfile = loadCloudProfile();
+  let resizeRaf = 0;
+  let lastOrientationMode = "";
+  let lastLandscapeHintAt = 0;
+
+  function cleanCharacterName(raw) {
+    const normalized = String(raw || "")
+      .replace(/[^a-zA-Z0-9 _-]/g, "")
+      .trim()
+      .slice(0, 24);
+    return normalized || "Mechanic";
+  }
+
+  function newProfileId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return `mech-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function loadCloudProfile() {
+    try {
+      const raw = localStorage.getItem(CLOUD_PROFILE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.playerId) {
+          return {
+            playerId: String(parsed.playerId),
+            characterName: cleanCharacterName(parsed.characterName)
+          };
+        }
+      }
+    } catch (_err) {
+      // Invalid profile data is replaced with a new profile.
+    }
+
+    const fresh = {
+      playerId: newProfileId(),
+      characterName: "Mechanic"
+    };
+    localStorage.setItem(CLOUD_PROFILE_KEY, JSON.stringify(fresh));
+    return fresh;
+  }
+
+  function saveCloudProfile() {
+    localStorage.setItem(CLOUD_PROFILE_KEY, JSON.stringify(cloudProfile));
+  }
+
+  function isCloudEnabled() {
+    return Boolean(
+      cloudConfig &&
+      cloudConfig.url &&
+      cloudConfig.anonKey &&
+      cloudConfig.table
+    );
+  }
+
+  function cloudHeaders() {
+    return {
+      "Content-Type": "application/json",
+      apikey: cloudConfig.anonKey,
+      Authorization: `Bearer ${cloudConfig.anonKey}`
+    };
+  }
+
+  function getCompetitionScore() {
+    const moneyScore = Math.floor(game.state.money / 15);
+    const levelScore = game.state.level * 450;
+    const repairsScore = game.state.totalRepairs * 35;
+    const strikePenalty = game.state.strikes * 220;
+    return Math.max(0, moneyScore + levelScore + repairsScore - strikePenalty);
+  }
+
+  function setBoardStatus(message) {
+    if (boardStatusText) boardStatusText.textContent = message;
+  }
+
+  function renderBoardRows(rows) {
+    if (!boardList) return;
+    boardList.innerHTML = "";
+    if (!rows.length) {
+      const empty = document.createElement("li");
+      empty.textContent = "No scores yet. Be the first to post a score.";
+      boardList.appendChild(empty);
+      return;
+    }
+
+    for (const row of rows) {
+      const item = document.createElement("li");
+      item.className = "board-entry";
+
+      const left = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "board-entry-name";
+      name.textContent = cleanCharacterName(row.character_name || "Mechanic");
+
+      const meta = document.createElement("div");
+      meta.className = "board-entry-meta";
+      meta.textContent = `Lv.${row.level || 1} • Repairs ${row.total_repairs || 0}`;
+
+      left.appendChild(name);
+      left.appendChild(meta);
+
+      const score = document.createElement("div");
+      score.className = "board-entry-score";
+      score.textContent = Number(row.score || 0).toLocaleString();
+
+      item.appendChild(left);
+      item.appendChild(score);
+      boardList.appendChild(item);
+    }
+  }
+
+  async function fetchLeaderboardRows() {
+    if (!isCloudEnabled()) {
+      setBoardStatus("Cloud not configured. Add MOTY_CONFIG in config.js.");
+      return;
+    }
+
+    const qs = new URLSearchParams({
+      select: "character_name,score,level,total_repairs,updated_at",
+      order: "score.desc,updated_at.asc",
+      limit: String(LEADERBOARD_LIMIT)
+    });
+
+    const response = await fetch(`${cloudConfig.url}/rest/v1/${cloudConfig.table}?${qs.toString()}`, {
+      method: "GET",
+      headers: cloudHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`Leaderboard fetch failed (${response.status})`);
+    }
+
+    const rows = await response.json();
+    game.leaderboard.rows = Array.isArray(rows) ? rows : [];
+    renderBoardRows(game.leaderboard.rows);
+    setBoardStatus("Live global standings");
+  }
+
+  async function submitLeaderboardScore(showFeedback = true) {
+    if (!isCloudEnabled()) {
+      setBoardStatus("Cloud not configured. Add MOTY_CONFIG in config.js.");
+      if (showFeedback) showToast("Cloud board unavailable");
+      return;
+    }
+    if (game.leaderboard.syncing) return;
+
+    game.leaderboard.syncing = true;
+    const scoreNow = getCompetitionScore();
+    game.state.bestCompetitionScore = Math.max(game.state.bestCompetitionScore || 0, scoreNow);
+    const payload = {
+      player_id: cloudProfile.playerId,
+      character_name: cleanCharacterName(game.state.characterName || cloudProfile.characterName),
+      score: game.state.bestCompetitionScore,
+      level: game.state.level,
+      total_repairs: game.state.totalRepairs,
+      money: Math.floor(game.state.money),
+      updated_at: new Date().toISOString()
+    };
+
+    try {
+      const url = `${cloudConfig.url}/rest/v1/${cloudConfig.table}?on_conflict=player_id`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          ...cloudHeaders(),
+          Prefer: "resolution=merge-duplicates,return=minimal"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Score submit failed (${response.status})`);
+      }
+
+      game.leaderboard.lastSyncElapsed = game.elapsed;
+      if (showFeedback) showToast("Score submitted");
+      setBoardStatus("Score synced across devices");
+    } catch (_err) {
+      if (showFeedback) showToast("Score sync failed");
+      setBoardStatus("Could not sync score. Check cloud config/policies.");
+    } finally {
+      game.leaderboard.syncing = false;
+    }
+  }
+
+  function applyProfileToState() {
+    game.state.characterName = cleanCharacterName(game.state.characterName || cloudProfile.characterName);
+    cloudProfile.characterName = game.state.characterName;
+    saveCloudProfile();
+    if (characterNameInput) characterNameInput.value = game.state.characterName;
+  }
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -683,9 +893,10 @@
     updateUI();
   }
 
-  function saveProgressWithFeedback() {
+  async function saveProgressWithFeedback() {
     saveGame();
     showToast("Progress saved");
+    await submitLeaderboardScore(false);
   }
 
   function triggerIncident() {
@@ -2179,7 +2390,49 @@
     root.style.setProperty("--hud-bottom", `${bottomPad}px`);
   }
 
+  function updateViewportHeightVar() {
+    const viewportHeight = Math.max(
+      1,
+      Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
+    );
+    document.documentElement.style.setProperty("--vvh", `${viewportHeight}px`);
+  }
+
+  function queueResize() {
+    if (resizeRaf) return;
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = 0;
+      resize();
+    });
+  }
+
+  function maybeShowLandscapeSpaceHint(force = false) {
+    if (!isLikelyMobileDevice()) {
+      lastOrientationMode = "";
+      return;
+    }
+
+    const viewportWidth = Math.floor(window.visualViewport?.width || window.innerWidth || 0);
+    const viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || 0);
+    const orientationMode = viewportWidth > viewportHeight ? "landscape" : "portrait";
+    const orientationChanged = orientationMode !== lastOrientationMode;
+
+    if (orientationChanged) {
+      lastOrientationMode = orientationMode;
+    }
+
+    const isShortLandscape = orientationMode === "landscape" && viewportHeight <= 430;
+    if (!isShortLandscape || document.fullscreenElement) return;
+    if (!force && !orientationChanged) return;
+
+    const now = Date.now();
+    if (now - lastLandscapeHintAt < 10000) return;
+    lastLandscapeHintAt = now;
+    showToast("Tip: Tap Fullscreen for more room in landscape");
+  }
+
   function resize() {
+    updateViewportHeightVar();
     updateLayoutMetrics();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = canvas.getBoundingClientRect();
@@ -2190,6 +2443,7 @@
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    maybeShowLandscapeSpaceHint();
   }
 
   function updateUI() {
@@ -3166,6 +3420,14 @@
       saveGame();
     }
 
+    if (
+      isCloudEnabled() &&
+      !game.leaderboard.syncing &&
+      game.elapsed - game.leaderboard.lastSyncElapsed >= CLOUD_SYNC_INTERVAL_SECONDS
+    ) {
+      submitLeaderboardScore(false);
+    }
+
     updateUI();
   }
 
@@ -3302,6 +3564,7 @@
     joystickArea.addEventListener("pointercancel", joyEnd);
 
     upgradeBtn.addEventListener("click", openUpgradeModal);
+    boardBtn.addEventListener("click", openBoardModal);
 
     pauseBtn.addEventListener("click", togglePause);
     saveBtn.addEventListener("click", saveProgressWithFeedback);
@@ -3313,12 +3576,44 @@
     fullscreenBtn.addEventListener("click", toggleFullscreen);
     document.addEventListener("fullscreenchange", () => {
       updateFullscreenButtonLabel();
-      resize();
+      queueResize();
+      if (!document.fullscreenElement) {
+        setTimeout(() => {
+          maybeShowLandscapeSpaceHint(true);
+        }, 120);
+      }
     });
 
     claimDailyBtn.addEventListener("click", () => {
       claimDailyReward();
       dailyModal.close();
+    });
+
+    saveCharacterBtn.addEventListener("click", () => {
+      game.state.characterName = cleanCharacterName(characterNameInput.value);
+      cloudProfile.characterName = game.state.characterName;
+      saveCloudProfile();
+      characterNameInput.value = game.state.characterName;
+      saveGame();
+      setBoardStatus(`Saved as ${game.state.characterName}`);
+      showToast(`Name set: ${game.state.characterName}`);
+    });
+
+    submitBoardBtn.addEventListener("click", async () => {
+      await submitLeaderboardScore(true);
+      await fetchLeaderboardRows().catch(() => {});
+    });
+
+    refreshBoardBtn.addEventListener("click", async () => {
+      await fetchLeaderboardRows().catch(() => {
+        showToast("Board refresh failed");
+      });
+    });
+
+    characterNameInput.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      saveCharacterBtn.click();
     });
 
     soundToggle.addEventListener("change", () => {
@@ -3329,10 +3624,14 @@
       game.settings.vibration = vibrationToggle.checked;
     });
 
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", queueResize);
+    window.addEventListener("orientationchange", () => {
+      queueResize();
+      setTimeout(queueResize, 140);
+    });
     if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", resize);
-      window.visualViewport.addEventListener("scroll", resize);
+      window.visualViewport.addEventListener("resize", queueResize);
+      window.visualViewport.addEventListener("scroll", queueResize);
     }
     window.addEventListener("beforeunload", saveGame);
   }
@@ -3340,6 +3639,19 @@
   function openUpgradeModal() {
     updateUpgradeUI();
     upgradeModal.showModal();
+  }
+
+  async function openBoardModal() {
+    if (!boardModal) return;
+    characterNameInput.value = cleanCharacterName(game.state.characterName || cloudProfile.characterName);
+    boardModal.showModal();
+    setBoardStatus(isCloudEnabled() ? "Loading global standings..." : "Cloud not configured. Add MOTY_CONFIG in config.js.");
+    try {
+      await fetchLeaderboardRows();
+    } catch (_err) {
+      renderBoardRows([]);
+      setBoardStatus("Could not load board. Verify cloud configuration.");
+    }
   }
 
   function isLikelyMobileDevice() {
@@ -3417,6 +3729,7 @@
 
   function init() {
     loadGame();
+    applyProfileToState();
     game.dayTracker.currentDay = getCurrentDay();
     game.dayTracker.season = getCurrentSeason();
     setupControls();
@@ -3431,6 +3744,8 @@
 
     updateUpgradeUI();
     updateUI();
+    renderBoardRows(game.leaderboard.rows);
+    setBoardStatus(isCloudEnabled() ? "Ready to sync global standings" : "Cloud not configured. Add MOTY_CONFIG in config.js.");
     requestAnimationFrame(frame);
   }
 

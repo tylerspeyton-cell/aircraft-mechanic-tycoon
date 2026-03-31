@@ -58,6 +58,7 @@
 
   <nav class="bottom-actions">
     <button id="upgradeBtn" class="pill-btn">Upgrades</button>
+    <button id="boardBtn" class="pill-btn">Mechanic of the Year</button>
     <button id="pauseBtn" class="pill-btn">Pause</button>
     <button id="saveBtn" class="pill-btn">Save</button>
     <button id="settingsBtn" class="pill-btn">Settings</button>
@@ -117,6 +118,32 @@
     </form>
   </dialog>
 
+  <dialog id="boardModal" class="modal">
+    <form method="dialog" class="modal-panel board-panel">
+      <h2>Mechanic of the Year</h2>
+      <p class="modal-sub">Saved across devices using your character name.</p>
+
+      <label class="field-label" for="characterNameInput">Character Name</label>
+      <div class="board-name-row">
+        <input id="characterNameInput" class="text-input" type="text" maxlength="24" placeholder="Enter your mechanic name" />
+        <button id="saveCharacterBtn" type="button" class="pill-btn primary">Save Name</button>
+      </div>
+
+      <div class="board-actions">
+        <button id="submitBoardBtn" type="button" class="pill-btn primary">Submit Current Score</button>
+        <button id="refreshBoardBtn" type="button" class="pill-btn">Refresh Board</button>
+      </div>
+
+      <p id="boardStatusText" class="board-status">Set your cloud config to enable global ranking sync.</p>
+      <ol id="boardList" class="board-list"></ol>
+
+      <div class="modal-actions">
+        <button value="cancel" class="pill-btn">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="config.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
