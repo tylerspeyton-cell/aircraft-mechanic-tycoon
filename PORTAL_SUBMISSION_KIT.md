@@ -78,6 +78,54 @@ Follow these to avoid low-quality traffic penalties and ad policy issues:
 - Keep load time low (under 3 seconds on average mobile networks).
 - Track retention (D1, D7) and average session length; these metrics influence long-term revenue outcomes.
 
+## 9A. Revenue Preset (Recommended)
+
+Use this baseline setup when portals allow ad tuning:
+
+- Interstitial timing:
+	- Show only at safe breaks: end of run, restart after fired screen, or every 3 to 4 in-game days.
+	- Never show while player is actively repairing, moving, or typing.
+	- Frequency cap: minimum 120 to 180 seconds between interstitials.
+- Rewarded ad placements:
+	- Optional bonus cash: 1.5x daily reward claim.
+	- Optional instant repair boost: short temporary boost (for example 45 seconds).
+	- Optional continue after failure: one continue per session.
+	- Keep all rewarded options clearly optional and user-initiated.
+- Session quality targets:
+	- D1 retention target: 25%+
+	- D7 retention target: 8%+
+	- Average session length target: 8 to 12 minutes
+	- Sessions per user per day target: 1.6+
+
+Higher-quality engagement usually improves portal featuring and ad value.
+
+## 9B. Mobile Performance Targets
+
+To protect ad fill and user retention:
+
+- Largest Contentful Paint target: under 2.5s on mid-tier mobile.
+- Time to interactive target: under 3s.
+- Orientation stability:
+	- Portrait and landscape both playable.
+	- No control overlap with HUD or safe-area cutouts.
+	- No blocked text input in name/leaderboard fields.
+- Runtime smoothness target: stable 50 to 60 FPS on common devices.
+
+## 9C. Analytics Events To Track
+
+If your portal or analytics provider supports custom events, log at least:
+
+- `session_start`
+- `session_end` (include session length)
+- `day_reached` (day number)
+- `upgrade_purchased` (upgrade id, cost)
+- `ad_interstitial_shown`
+- `ad_rewarded_offer`
+- `ad_rewarded_completed`
+- `ad_rewarded_skipped`
+
+These events help you tune ad cadence without hurting retention.
+
 ## 10. Fast Portal Notes
 
 ### CrazyGames
