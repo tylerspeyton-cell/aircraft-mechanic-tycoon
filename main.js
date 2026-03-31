@@ -3451,8 +3451,17 @@
     }
   }
 
+  function isTypingInField(target) {
+    if (!target || !(target instanceof Element)) return false;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return true;
+    if (target instanceof HTMLElement && target.isContentEditable) return true;
+    return false;
+  }
+
   function setupControls() {
     window.addEventListener("keydown", (ev) => {
+      if (isTypingInField(ev.target)) return;
+
       const key = ev.key.toLowerCase();
       if (key === "p") {
         togglePause();
@@ -3481,6 +3490,8 @@
     });
 
     window.addEventListener("keyup", (ev) => {
+      if (isTypingInField(ev.target)) return;
+
       const key = ev.key.toLowerCase();
       if (isGamePaused()) {
         if (key === " " || key === "e") game.input.actionHeld = false;
